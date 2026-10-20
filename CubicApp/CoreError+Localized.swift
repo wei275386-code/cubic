@@ -1,0 +1,103 @@
+import Foundation
+import CubicCore
+
+extension CoreError: @retroactive LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .invalid(let message): return CoreErrorCopy.invalid(message)
+        case .missing: return "关联的内容已不存在，请重新选择。"
+        case .blocked(let message):
+            switch message {
+            case "节点完成门槛未满足": return "节点还有待处理事项，请先完成工作、等待和验收。"
+            case "项目完成门槛未满足": return "项目还有待处理事项，请到项目详情逐项处理。"
+            case "验收对象未完成或需要复核": return "请先完成工作并复核成果，再确认验收通过。"
+            case "失败条件需确认实际返工范围": return "请先确认哪些工作需要返工。"
+            case "节点必需范围、工作、等待或复核尚未处理": return "请处理节点的剩余工作、验收、等待和复核。"
+            default:
+                if message.hasPrefix("node waiting:") { return "整个节点还有等待未结束，请到节点详情确认。" }
+                if message.contains("反事实") { return "请先处理前置和成果复核，或开启“假设前置已完成，再试算”。实际状态不会改变。" }
+                if message.hasPrefix("无法试算受阻任务") { return "这项工作还不能开始，请先检查前置条件。" }
+                return message
+            }
+        case .cycle: return "这些工作互相等待，请调整前置关系。"
+        case .unsupportedSchema: return "这份备份来自不支持的数据版本，请使用兼容版本。"
+        case .corruptData: return "这份数据不完整或格式有误，请使用其他备份。"
+        case .storage: return "暂时无法保存到此设备，请检查可用存储空间后重试。"
+        }
+    }
+}
+
+extension SyncError: @retroactive LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .staleConflict: return "冲突内容已变化，请返回列表查看最新版本。"
+        case .accountChanged: return "iCloud 账号已变化，请到设置选择此账号使用的数据。"
+        case .requiresSigning: return "当前安装的版本暂不支持 iCloud 同步，可以继续使用本机数据。"
+        case .accountUnavailable: return "暂时无法使用 iCloud，请检查系统登录状态和使用权限。"
+        case .transport: return "暂时无法完成 iCloud 同步，请稍后重试。"
+        case .persistence: return "暂时无法保存同步数据，请稍后重试。"
+        case .unresolvedEdit: return "这项内容还有同步冲突，请先选择要使用的版本。"
+        case .missingParent: return "部分同步记录还没下载完整，请重新同步。"
+        case .invalidJournal, .identityCollision, .wrongWorkspace: return "这份同步数据无法合并，请检查备份或重新同步。"
+        }
+    }
+}
+
+private enum CoreErrorCopy {
+    static func invalid(_ message: String) -> String {
+        let messages = [
+            "项目完成需 completeProject": "请在项目详情中确认完成。",
+            "节点归属/完成/轮次/复核不可通过编辑覆盖": "这些节点状态需在节点详情中调整。",
+            "业务事实与基线需专用命令，不能经普通编辑覆盖": "请使用开始工作、完成或更正记录来调整这些内容。",
+            "等待状态需 trigger/resolve 命令": "请使用发起等待或确认等待已结束来调整状态。",
+            "已解除条件修改需先重开等待": "这项等待已结束，请先重新发起再修改。",
+            "验收事实需专用命令": "请在验收条件中确认通过或未通过。",
+            "移除依赖需 removeDependency": "请在前置关系列表中移除这条关系。",
+            "主归属不可作为共享引用移除；请显式调整归属": "这是主要所属项目，请先修改所属项目再移除关联。",
+            "节点确认早于已有成果事实": "节点完成时间不能早于已有成果的完成时间。",
+            "项目确认早于已有成果事实": "项目完成时间不能早于已有成果的完成时间。",
+            "估计已经被更正或更正早于原事实": "这次估计已被更正，或更正时间早于原记录，请核对。",
+            "更正早于原记录": "更正时间不能早于原记录。",
+            "分摊需至少两条有效记录及逐项分钟": "请选择至少两条投入记录，并填写每条分配的分钟数。",
+            "分摊须为有效精确区间": "请使用已记录起止时间、尚未撤销的投入记录。",
+            "需核对整组重叠记录，不能仅确认其中一部分": "请一起核对这组重叠记录。",
+            "分摊合计超过唯一实际时间": "分配的总分钟数超过了实际经过的时间，请减少分配。",
+            "失败早于原验收结果": "验收未通过的时间不能早于原验收结果。",
+            "需要尚未确认范围的失败验收": "这条验收无需再次选择返工范围，请查看最新状态。",
+            "返工估计必须属于已确认工作": "请只填写已选返工工作的时间估计。",
+            "沿用需明确选择该条件的历史通过结果": "请选择这条验收以前通过的结果。",
+            "节点不存在或无需复核": "节点已不可用，或已无需复核，请查看最新状态。",
+            "复核早于原成果事实": "复核时间不能早于原成果的完成时间。",
+            "当前选择需为未完成有效行动": "请选择尚未完成、可以继续做的工作。",
+            "仅 pending 可开工": "这项工作已经开始或完成，请查看最新状态。",
+            "新轮开工早于既有事实": "新的开始时间不能早于之前的工作记录。",
+            "已完成任务须先返工": "这项工作已完成，需要继续投入时请先选择返工。",
+            "新验收必须 pending；通过逐项 accept": "新增验收先保存为待验收，再逐条确认通过。",
+            "已完成任务不能记录当前投入；可使用补录/更正": "这项工作已完成，请使用补录或更正记录。",
+            "投入归属日期不能在记录之后": "投入日期不能晚于记录时间。",
+            "已完成轮次请用显式历史补录": "这轮工作已完成，请使用补录历史投入。",
+            "历史补录必须明确过去发生日期和既有轮次": "请选择过去实际投入的日期和对应工作轮次。",
+            "所选轮次没有既有执行/完成事实，不能以历史补录伪造新轮已开工": "这轮尚无开始或完成记录，请先核对所选轮次。",
+            "历史补录发生日期不属于所选工作轮次": "投入日期不属于所选轮次，请重新选择。",
+            "任务已经完成": "这项工作已经完成。",
+            "完成早于实际工作": "完成时间不能早于实际投入时间。",
+            "返工早于既有工作": "返工时间不能早于之前的工作记录。",
+            "任务无需复核": "这项工作已无需复核，请查看最新状态。",
+            "blocker 已触发": "这项等待已经发起。",
+            "触发早于上次解除": "重新发起时间不能早于上次等待结束时间。",
+            "只能解除已触发 blocker": "请先发起等待，再确认等待已结束。",
+            "本轮条件已经通过": "这条验收本轮已经通过。",
+            "验收早于已有完成/解除事实": "验收时间不能早于工作完成或等待结束时间。",
+            "验收早于失败事实": "重新验收的时间不能早于上次未通过的时间。"
+        ]
+        if let value = messages[message] { return value }
+        if message.contains("item.nodeID") { return "工作所属节点与项目不一致，请重新选择。" }
+        if message.contains("ID") { return "数据里有重复或缺失的记录，请检查备份。" }
+        if message.unicodeScalars.contains(where: { (65...90).contains(Int($0.value)) || (97...122).contains(Int($0.value)) }) {
+            return "数据的状态、时间或关联不完整，请检查相关内容；导入时可以换一份备份。"
+        }
+        return message.replacingOccurrences(of: "既有事实", with: "已有记录")
+            .replacingOccurrences(of: "原成果事实", with: "原成果记录")
+            .replacingOccurrences(of: "基线值缺真实采集时点", with: "开工前估计缺少记录时间，请检查备份。")
+    }
+}

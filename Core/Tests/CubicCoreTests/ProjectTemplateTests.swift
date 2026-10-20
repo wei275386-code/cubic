@@ -1,0 +1,409 @@
+import Foundation
+import Testing
+@testable import CubicCore
+
+// Sources only: run as part of the ONE independent unified QA session after the parent milestone.
+private enum TemplateFixture {
+    static let now = Date(timeIntervalSince1970: 1_800_000_000)
+    static func date(_ value: String) -> Date { ISO8601DateFormatter().date(from: value)! }
+    static var base: Workspace {
+        Workspace(projects: [Project(id: "p", name: "Saved project name", deadline: now.addingTimeInterval(86_400),
+                                     importance: 3, description: "Project description", calendarIdentifier: "old-calendar")],
+                  nodes: [Node(id: "z", projectID: "p", name: "First", outcome: "Outcome"),
+                          Node(id: "a", projectID: "p", name: "Second"), Node(id: "empty", projectID: "p", name: "Empty")],
+                  items: [WorkItem(id: "work-z", name: "First work", nodeID: "z", projectIDs: ["p"], remainingMinutes: 25,
+                                   initialMinutes: 999, description: "Work description", isFocused: true),
+                          WorkItem(id: "work-a", name: "Parallel work", nodeID: "z", projectIDs: ["p"], remainingMinutes: 35),
+                          WorkItem(id: "target", name: "Target", nodeID: "a", projectIDs: ["p"], remainingMinutes: 15),
+                          WorkItem(id: "direct", name: "Direct", projectIDs: ["p"], remainingMinutes: nil)])
+    }
+    static func save(_ workspace: inout Workspace) throws -> String {
+        try workspace.saveProjectTemplate(projectID: "p", title: "Display title", now: now)
+    }
+    static func instantiate(_ workspace: inout Workspace, _ id: String) throws -> String {
+        try workspace.instantiateProjectTemplate(templateID: id, deadline: now.addingTimeInterval(172_800),
+                                                 timeZoneID: "UTC", dateOnly: false, now: now.addingTimeInterval(10))
+    }
+    static func revision(_ workspace: Workspace, old: Workspace? = nil, id: String, parents: [String] = []) throws -> SyncRevision {
+        try .recording(workspace: workspace, comparedTo: old, id: id, workspaceID: "templates", deviceID: id,
+                       parents: parents, createdAt: now)
+    }
+    static func directory() throws -> URL {
+        let result = FileManager.default.temporaryDirectory.appendingPathComponent("TemplateTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: result, withIntermediateDirectories: true)
+        return result
+    }
+}
+
+@Test func templateSavesCurrentDurationAndRestoresLatestUncorrectedConfiguredDuration() throws {
+    var w = TemplateFixture.base
+    try w.updateRemaining(itemID: "work-z", minutes: 47, now: TemplateFixture.now)
+    w.items[1].status = .completed; w.items[1].remainingMinutes = 0; w.items[1].completedAt = TemplateFixture.now
+    w.items[1].round = 2; w.items[1].initialMinutes = 900
+    w.estimateRevisions = (w.estimateRevisions ?? []) + [
+        EstimateRevision(id: "older-round", itemID: "work-a", date: TemplateFixture.now.addingTimeInterval(9), minutes: 777, round: 1),
+        EstimateRevision(id: "superseded", itemID: "work-a", date: TemplateFixture.now, minutes: 55, round: 2),
+        EstimateRevision(id: "correction", itemID: "work-a", date: TemplateFixture.now.addingTimeInterval(1), minutes: 61, round: 2, correctsRevisionID: "superseded"),
+        EstimateRevision(id: "z-latest", itemID: "work-a", date: TemplateFixture.now.addingTimeInterval(2), minutes: 72, round: 2),
+        EstimateRevision(id: "a-latest", itemID: "work-a", date: TemplateFixture.now.addingTimeInterval(2), minutes: 71, round: 2)]
+    let preview = w.previewProjectTemplate(projectID: "p")
+    let payload = try #require(preview.payload)
+    #expect(payload.items.first { $0.name == "First work" }?.durationMinutes == 47)
+    #expect(payload.items.first { $0.name == "Parallel work" }?.durationMinutes == 72)
+    #expect(payload.items.first { $0.name == "Direct" }?.durationMinutes == 60)
+    let json = String(decoding: try JSONEncoder().encode(payload), as: UTF8.self)
+    #expect(!json.contains("initialMinutes")); #expect(!json.contains("preStartMinutes")); #expect(!json.contains("estimate"))
+    w.estimateRevisions?.removeAll { $0.itemID == "work-a" }
+    let fallback = w.previewProjectTemplate(projectID: "p")
+    #expect(fallback.payload?.items.first { $0.name == "Parallel work" }?.durationMinutes == 60)
+    #expect(fallback.warnings.contains { $0.code == .durationFallback && $0.objectID == "work-a" })
+}
+
+@Test func templateSnapshotAndInstancesSurviveOriginalAndTemplateDeletion() throws {
+    var w = TemplateFixture.base
+    let id = try TemplateFixture.save(&w)
+    let payload = try #require(w.projectTemplate(id: id)?.payload)
+    let sourceIDs = Set(w.projects.map(\.id) + w.nodes.map(\.id) + w.items.map(\.id))
+    let snapshotIDs = Set([payload.project.id] + payload.nodes.map(\.id) + payload.items.map(\.id))
+    #expect(sourceIDs.isDisjoint(with: snapshotIDs))
+    w.projects.removeAll(); w.nodes.removeAll(); w.items.removeAll()
+    let first = try TemplateFixture.instantiate(&w, id)
+    let second = try TemplateFixture.instantiate(&w, id)
+    #expect(first != second)
+    let firstWork = w.items.filter { $0.projectIDs == [first] }, secondWork = w.items.filter { $0.projectIDs == [second] }
+    #expect(Set(firstWork.map(\.id)).isDisjoint(with: Set(secondWork.map(\.id))))
+    #expect(Set(firstWork.map(\.id)).isDisjoint(with: snapshotIDs))
+    try w.renameProjectTemplate(templateID: id, title: "Renamed display title", now: TemplateFixture.now)
+    #expect(w.projects.allSatisfy { $0.name == "Saved project name" })
+    let runtime = w.items
+    try w.deleteProjectTemplate(templateID: id, now: TemplateFixture.now)
+    #expect(w.items == runtime); #expect(w.availableProjectTemplates().isEmpty)
+    let before = w
+    #expect(throws: CoreError.self) { try TemplateFixture.instantiate(&w, id) }
+    #expect(w == before)
+    #expect(w.projectTemplate(id: id)?.payload == payload)
+}
+
+@Test func templateCopiesExactGraphAndResetsExecutionWithoutInventingSequentialEdges() throws {
+    var w = TemplateFixture.base
+    w.blockers = [Blocker(id: "block", name: "Approval", state: .resolved,
+                         expectedResolution: TemplateFixture.now.addingTimeInterval(100), triggeredAt: TemplateFixture.now,
+                         resolvedAt: TemplateFixture.now, resolutionCondition: "Signed", expectedDurationMinutes: 90,
+                         followUpAt: TemplateFixture.now, contactNote: "Contact", followUpItemID: "direct", round: 4)]
+    w.nodes[1].blockerIDs = ["block"]; w.nodes[0].needsReview = true; w.nodes[0].round = 7
+    w.items[0].status = .completed; w.items[0].completedAt = TemplateFixture.now; w.items[0].remainingMinutes = 0
+    w.items[0].started = TemplateFixture.now; w.items[0].preStartMinutes = 900; w.items[0].preStartCapturedAt = TemplateFixture.now
+    w.estimateRevisions = [EstimateRevision(itemID: "work-z", date: TemplateFixture.now, minutes: 25)]
+    w.dependencies = [Dependency(id: "item-edge", source: .item("direct"), targetItemID: "work-z"),
+                      Dependency(id: "node-edge", source: .node("z"), targetItemID: "target"),
+                      Dependency(id: "block-edge", source: .blocker("block"), targetItemID: "work-a"),
+                      Dependency(id: "removed-edge", source: .item("work-z"), targetItemID: "work-a", removedAt: TemplateFixture.now)]
+    w.acceptances = [Acceptance(id: "gate", subject: .item("work-z"), name: "Pass", state: .accepted, acceptedAt: TemplateFixture.now),
+                     Acceptance(id: "node-gate", subject: .node("z"), name: "Node pass"),
+                     Acceptance(id: "removed-gate", subject: .item("work-a"), name: "Old", removedAt: TemplateFixture.now)]
+    let preview = w.previewProjectTemplate(projectID: "p")
+    #expect(preview.warnings.contains { $0.code == .clearedBlockerDates })
+    let id = try TemplateFixture.save(&w)
+    let newProject = try TemplateFixture.instantiate(&w, id)
+    let newNodes = w.nodes.filter { $0.projectID == newProject }, newItems = w.items.filter { $0.projectIDs == [newProject] }
+    let newIDs = Set(newItems.map(\.id)), newNodeIDs = Set(newNodes.map(\.id))
+    let edges = w.dependencies.filter { newIDs.contains($0.targetItemID) }
+    #expect(edges.count == 3)
+    #expect(edges.contains { if case .node(let id) = $0.source { return newNodeIDs.contains(id) }; return false })
+    #expect(newNodes.allSatisfy { $0.sequentialDependenciesInitialized == true && $0.currentRound == 1 && $0.needsReview == false })
+    #expect(newItems.allSatisfy { $0.status == .pending && $0.effectiveDisposition == .active && $0.isFocused == false && $0.started == nil && $0.preStartMinutes == nil })
+    let newBlocker = try #require(w.blockers.first { $0.id != "block" })
+    #expect(newBlocker.state == .inactive && newBlocker.round == 1 && newBlocker.expectedDurationMinutes == 90)
+    #expect(newBlocker.followUpAt == nil && newBlocker.expectedResolution == nil && newBlocker.resolvedAt == nil)
+    #expect(newIDs.contains(newBlocker.followUpItemID!))
+    #expect(w.projects.first { $0.id == newProject }?.calendarIdentifier == nil)
+    #expect(w.acceptances.filter { newIDs.contains($0.subject.id) || newNodeIDs.contains($0.subject.id) }.allSatisfy { $0.state == .pending && $0.round == 1 && $0.acceptedAt == nil })
+    let newHistory = w.history.filter { newIDs.contains($0.objectID) || newNodeIDs.contains($0.objectID) }
+    #expect(newHistory.allSatisfy { $0.kind == .created && $0.date == TemplateFixture.now.addingTimeInterval(10) })
+    for item in newItems {
+        let event = try #require(w.history.first { $0.id == item.initialEstimateEventID })
+        #expect(event.minutes == item.remainingMinutes)
+        #expect((w.estimateRevisions ?? []).contains { $0.itemID == item.id && $0.minutes == item.remainingMinutes && (event.relatedIDs ?? []).contains($0.id) })
+    }
+    let before = Set(w.dependencies.map(\.id))
+    try w.initializeSequentialDependencies(projectID: newProject, now: TemplateFixture.now.addingTimeInterval(20))
+    #expect(Set(w.dependencies.map(\.id)) == before)
+}
+
+@Test func templateCopiesSharedMembershipAndAliasesOnceWithStableHierarchy() throws {
+    var w = TemplateFixture.base
+    w.projects.append(Project(id: "other", name: "Other"))
+    w.nodes.append(Node(id: "foreign", projectID: "other", name: "Foreign"))
+    w.items[3].projectIDs = ["other", "p"]; w.items[3].nodeID = "foreign"
+    w.workLinks = [WorkLink(id: "alias-z", source: .item("direct"), projectID: "p", nodeID: "z"),
+                   WorkLink(id: "alias-a", source: .item("direct"), projectID: "p", nodeID: "a"),
+                   WorkLink(id: "node-alias", source: .node("z"), projectID: "p", isRequired: false)]
+    let id = try TemplateFixture.save(&w), payload = try #require(w.projectTemplate(id: id)?.payload)
+    #expect(payload.items.count == 4 && payload.workLinks.count == 3)
+    #expect(payload.structure.nodes.map(\.name) == ["First", "Second", "Empty"])
+    #expect(payload.structure.membersByNode[payload.nodes[0].id]?.map(\.name) == ["First work", "Parallel work"])
+    #expect(payload.structure.directItems.map(\.name) == ["Direct"])
+    let copied = try TemplateFixture.instantiate(&w, id)
+    let members = w.items.filter { $0.projectIDs.contains(copied) }
+    #expect(members.count == 4 && members.allSatisfy { $0.projectIDs == [copied] })
+    let shared = try #require(members.first { $0.name == "Direct" })
+    #expect(shared.nodeID == nil)
+    let aliases = (w.workLinks ?? []).filter { $0.projectID == copied && $0.source == .item(shared.id) }
+    #expect(aliases.count == 2 && aliases.map(\.structureOrder) == [1, 2])
+    let revision = try TemplateFixture.revision(w, id: "stable-order")
+    let merged = try SyncMerge.merge(revisions: [revision], workspaceID: "templates")
+    #expect(merged.workspace.nodes.filter { $0.projectID == copied }.map(\.name) == ["First", "Second", "Empty"])
+    #expect(merged.workspace.items.filter { $0.nodeID == members.first { $0.name == "First work" }?.nodeID && $0.projectIDs == [copied] }.map(\.name) == ["First work", "Parallel work"])
+    #expect((merged.workspace.workLinks ?? []).filter { $0.projectID == copied }.map(\.structureOrder) == [1, 2, 3])
+}
+
+@Test func templateExclusionsNeverFlattenArchivedNodeMembersAndExternalRelationsBlockSave() throws {
+    var w = TemplateFixture.base
+    w.nodes[0].isArchived = true; w.items[2].disposition = .cancelled
+    let preview = w.previewProjectTemplate(projectID: "p")
+    #expect(preview.canSave)
+    #expect(preview.payload?.items.map(\.name) == ["Direct"])
+    #expect(preview.warnings.filter { $0.code == .excludedScope }.count == 4)
+    w.workLinks = [WorkLink(source: .item("work-z"), projectID: "p", nodeID: "a")]
+    #expect(w.previewProjectTemplate(projectID: "p").errors.contains { $0.code == .externalWorkLink })
+    w.workLinks = nil
+    w.dependencies = [Dependency(source: .item("work-z"), targetItemID: "direct")]
+    let before = w
+    #expect(w.previewProjectTemplate(projectID: "p").errors.contains { $0.code == .externalDependency })
+    #expect(throws: CoreError.self) { try TemplateFixture.save(&w) }
+    #expect(w == before)
+    w.dependencies = [Dependency(source: .item("direct"), targetItemID: "work-z")]
+    #expect(w.previewProjectTemplate(projectID: "p").errors.contains { $0.code == .externalDependency })
+}
+
+@Test func templateEmptyAndDirectProjectsRemainIndependentAndCannotCreatePlanningDemand() throws {
+    var w = Workspace(projects: [Project(id: "p", name: "Empty")])
+    let before = w
+    let id = try TemplateFixture.save(&w)
+    #expect(w.projects == before.projects && w.nodes == before.nodes && w.items == before.items)
+    #expect(w.previewProjectTemplate(projectID: "p").payload?.items.isEmpty == true)
+    let first = try TemplateFixture.instantiate(&w, id)
+    #expect(w.projects.first { $0.id == first }?.effectiveStatus == .planning)
+    #expect(w.nodes.isEmpty && w.items.isEmpty)
+    var direct = Workspace(projects: [Project(id: "p", name: "Direct only")],
+                           items: [WorkItem(name: "Direct", projectIDs: ["p"], remainingMinutes: 5)])
+    let directID = try TemplateFixture.save(&direct)
+    #expect(direct.projectTemplate(id: directID)?.payload?.structure.directItems.count == 1)
+    #expect(direct.projectTemplate(id: directID)?.payload?.nodes.isEmpty == true)
+    let graphBefore = try PlanningGraph(workspace: before, input: PlanningInput(slots: [], now: TemplateFixture.now, horizonEnd: TemplateFixture.now.addingTimeInterval(3600)))
+    let graphAfter = try PlanningGraph(workspace: Workspace(projects: before.projects, projectTemplates: w.projectTemplates), input: PlanningInput(slots: [], now: TemplateFixture.now, horizonEnd: TemplateFixture.now.addingTimeInterval(3600)))
+    #expect(graphBefore.vertices.keys.sorted() == graphAfter.vertices.keys.sorted())
+    #expect(graphAfter.vertices.isEmpty)
+}
+
+@Test func templateDeadlineAnchorFailureIsAtomicAndSuppliedAnchorDoesNotEditOriginal() throws {
+    var w = TemplateFixture.base; w.projects[0].deadline = nil
+    w.items[0].deadline = TemplateFixture.now.addingTimeInterval(900)
+    let preview = w.previewProjectTemplate(projectID: "p")
+    #expect(preview.needsDeadlineAnchor && !preview.canSave)
+    #expect(preview.errors.contains { $0.code == .needsDeadlineAnchor })
+    let before = w
+    #expect(throws: CoreError.self) { try TemplateFixture.save(&w) }
+    #expect(w == before)
+    let id = try w.saveProjectTemplate(projectID: "p", title: "Anchor", baselineDeadline: TemplateFixture.now,
+                                      baselineTimeZoneID: "UTC", now: TemplateFixture.now)
+    #expect(w.projects == before.projects && w.items == before.items)
+    #expect(w.projectTemplate(id: id)?.payload?.items[0].deadlineRule == .seconds(900))
+    let current = w
+    #expect(throws: CoreError.self) { try w.instantiateProjectTemplate(templateID: id, deadline: TemplateFixture.now, timeZoneID: "bad-zone", dateOnly: true, now: TemplateFixture.now) }
+    #expect(w == current)
+}
+
+@Test func templateCalendarDayOffsetsNormalizeDSTMonthAndYearAndExactIntervals() throws {
+    let zone = "America/New_York"
+    for (anchor, work, destination, expectedDay) in [
+        ("2026-03-07T17:00:00Z", "2026-03-09T16:00:00Z", "2026-10-31T16:00:00Z", 2),
+        ("2026-12-31T17:00:00Z", "2027-01-01T17:00:00Z", "2028-02-28T17:00:00Z", 1)] {
+        var w = Workspace(projects: [Project(id: "p", name: "Dates",
+            deadline: try Workspace.dateOnlyDeadline(on: TemplateFixture.date(anchor), timeZoneID: zone), deadlineTimeZoneID: zone, deadlineIsDateOnly: true)],
+            items: [WorkItem(name: "Day work", projectIDs: ["p"], remainingMinutes: 1,
+                deadline: try Workspace.dateOnlyDeadline(on: TemplateFixture.date(work), timeZoneID: zone), deadlineTimeZoneID: zone, deadlineIsDateOnly: true)])
+        let sourceAnchor = w.projects[0].deadline!
+        w.items.append(WorkItem(name: "Exact", projectIDs: ["p"], remainingMinutes: 2, deadline: sourceAnchor.addingTimeInterval(-123.25)))
+        let id = try TemplateFixture.save(&w)
+        #expect(w.projectTemplate(id: id)?.payload?.items[0].deadlineRule == .calendarDays(expectedDay))
+        let project = try w.instantiateProjectTemplate(templateID: id, deadline: TemplateFixture.date(destination), timeZoneID: zone, dateOnly: true, now: TemplateFixture.now)
+        let deadline = try #require(w.projects.first { $0.id == project }?.deadline)
+        let created = w.items.filter { $0.projectIDs == [project] }
+        var calendar = Calendar(identifier: .gregorian); calendar.timeZone = TimeZone(identifier: zone)!
+        let newDay = try #require(created.first { $0.name == "Day work" }?.deadline)
+        #expect(calendar.dateComponents([.day], from: calendar.startOfDay(for: deadline), to: calendar.startOfDay(for: newDay)).day == expectedDay)
+        #expect(abs(newDay.timeIntervalSince(try Workspace.dateOnlyDeadline(on: newDay, timeZoneID: zone))) < 0.002)
+        #expect(created.first { $0.name == "Exact" }?.deadline?.timeIntervalSince(deadline) == -123.25)
+        try w.validate()
+    }
+}
+
+@Test func templateBadPayloadsRejectAtomicallyIncludingCombinedImplicitAndAliasCycles() throws {
+    let p = ProjectTemplateProject(id: "p-template", name: "Bad")
+    let node = ProjectTemplateNode(id: "n-template", name: "N", structureOrder: 1)
+    let work = ProjectTemplateWork(id: "i-template", name: "I", nodeID: node.id, durationMinutes: 10, structureOrder: 1)
+    let invalid: [ProjectTemplatePayload] = [
+        .init(project: p, nodes: [node], items: [work], dependencies: [.init(source: .node(node.id), targetItemID: work.id)]),
+        .init(project: p, nodes: [node], workLinks: [.init(source: .node(node.id), nodeID: node.id, structureOrder: 1)]),
+        .init(project: p, items: [.init(name: "Negative", durationMinutes: -1, structureOrder: 1)]),
+        .init(project: p, items: [.init(name: "Offset", durationMinutes: 1, deadlineRule: .seconds(.infinity), structureOrder: 1)]),
+        .init(project: p, items: [.init(name: "Offset", durationMinutes: 1, deadlineRule: .calendarDays(36_501), structureOrder: 1)]),
+        .init(project: p, items: [work]),
+        .init(project: p, nodes: [node, node]),
+        .init(version: 99, project: p),
+        .init(project: p, acceptances: [.init(subject: .item("missing"), name: "Gate")])]
+    for payload in invalid {
+        let template = ProjectTemplate(title: "Bad", payload: payload)
+        var w = Workspace(projectTemplates: [template])
+        try w.validate() // quarantined template content never disables ordinary runtime commands/planning
+        let before = w
+        #expect(!template.canInstantiate)
+        #expect(throws: CoreError.self) { try TemplateFixture.instantiate(&w, template.id) }
+        #expect(w == before)
+    }
+}
+
+@Test func templateLegacyWorkspaceSQLiteBackupAndMalformedContentRoundTrip() throws {
+    let decoder = JSONDecoder(), encoder = JSONEncoder()
+    let legacy = try encoder.encode(TemplateFixture.base)
+    let old = try decoder.decode(Workspace.self, from: legacy)
+    #expect(old.projectTemplates == nil)
+    var w = old; let id = try TemplateFixture.save(&w)
+    let directory = try TemplateFixture.directory(); defer { try? FileManager.default.removeItem(at: directory) }
+    let repository = try SQLiteWorkspaceRepository(url: directory.appendingPathComponent("templates.sqlite"))
+    try repository.save(w)
+    #expect(try repository.load() == w)
+    let backup = try repository.backup()
+    let readOnlyCopy = directory.appendingPathComponent("backup-copy.sqlite")
+    try FileManager.default.copyItem(at: backup, to: readOnlyCopy)
+    #expect(try SQLiteWorkspaceRepository(url: readOnlyCopy).load() == w)
+    let export = directory.appendingPathComponent("export.json"); try repository.export(to: export)
+    let imported = try SQLiteWorkspaceRepository(url: directory.appendingPathComponent("import.sqlite"))
+    #expect(try imported.importWorkspace(from: export) == w)
+    var omitted = w; omitted.projectTemplates = nil
+    try repository.save(omitted)
+    #expect(try repository.load().projectTemplate(id: id)?.payload == w.projectTemplate(id: id)?.payload)
+    var root = try #require(JSONSerialization.jsonObject(with: try encoder.encode(w)) as? [String: Any])
+    var rows = try #require(root["projectTemplates"] as? [[String: Any]])
+    rows[0]["payload"] = ["unrecognized": "content", "items": ["bad"]]; root["projectTemplates"] = rows
+    let corrupt = try decoder.decode(Workspace.self, from: JSONSerialization.data(withJSONObject: root))
+    #expect(corrupt.projectTemplates?.first?.payload == nil)
+    try corrupt.validate()
+    let preserved = try #require(JSONSerialization.jsonObject(with: try encoder.encode(corrupt)) as? [String: Any])
+    let preservedRows = try #require(preserved["projectTemplates"] as? [[String: Any]])
+    #expect((preservedRows[0]["payload"] as? [String: Any])?["unrecognized"] as? String == "content")
+}
+
+@Test func templateSyncMetadataIsIndependentContentAtomicAndOfflineDeleteRetained() async throws {
+    var w = TemplateFixture.base; let id = try TemplateFixture.save(&w)
+    let root = try TemplateFixture.revision(w, id: "root")
+    #expect(root.changes.filter { $0.path.collection == "projectTemplates" && $0.path.field == "@templateContent" }.count == 1)
+    #expect(!root.changes.contains { $0.path.collection == "projectTemplates" && $0.path.field == "items" })
+    var renamed = w, deleted = w
+    try renamed.renameProjectTemplate(templateID: id, title: "New title", now: TemplateFixture.now)
+    try deleted.deleteProjectTemplate(templateID: id, now: TemplateFixture.now)
+    let rename = try TemplateFixture.revision(renamed, old: w, id: "rename", parents: ["root"])
+    let deletion = try TemplateFixture.revision(deleted, old: w, id: "delete", parents: ["root"])
+    #expect(!rename.changes.contains { $0.path.field == "@templateContent" })
+    #expect(!deletion.changes.contains { $0.path.field == "@templateContent" })
+    let merge = try SyncMerge.merge(revisions: [deletion, root, rename], workspaceID: "templates")
+    let template = try #require(merge.workspace.projectTemplate(id: id))
+    #expect(template.title == "New title" && template.isRemoved && !template.canInstantiate)
+    #expect(template.payload == w.projectTemplate(id: id)?.payload)
+    #expect(merge.planningIsValid && merge.pausedItemIDs.isEmpty)
+    let dir = try TemplateFixture.directory(); defer { try? FileManager.default.removeItem(at: dir) }
+    let journal = try SyncJournal(directory: dir, workspaceID: "templates", deviceID: "offline")
+    _ = try await journal.bootstrap(workspace: w)
+    _ = try await journal.record(workspace: renamed, currentChoiceID: nil)
+    let pending = await journal.pending(limit: 20)
+    #expect(pending.count == 2)
+    let snapshot = try await journal.snapshot()
+    #expect(snapshot.workspace.projectTemplate(id: id)?.title == "New title")
+    let archive = try await journal.exportArchive()
+    let restoreDir = try TemplateFixture.directory(); defer { try? FileManager.default.removeItem(at: restoreDir) }
+    let restored = try SyncJournal(directory: restoreDir, workspaceID: "templates", deviceID: "restore")
+    let result = try await restored.restoreArchive(archive)
+    #expect(result.workspace.projectTemplate(id: id)?.payload == template.payload)
+    var omitted = renamed; omitted.projectTemplates = nil
+    _ = try await journal.record(workspace: omitted, currentChoiceID: nil)
+    #expect(try await journal.snapshot().workspace.projectTemplate(id: id)?.payload == template.payload)
+}
+
+@Test func templateSyncContentConflictAndPartialPayloadNeverInvalidateRuntimePlanning() throws {
+    var w = TemplateFixture.base; let id = try TemplateFixture.save(&w)
+    let root = try TemplateFixture.revision(w, id: "root")
+    let path = SyncPath(collection: "projectTemplates", entityID: id, field: "@templateContent")
+    let original = try #require(root.changes.first { $0.path == path }?.value)
+    let left = SyncRevision(id: "left", workspaceID: "templates", deviceID: "left", parents: ["root"], createdAt: TemplateFixture.now,
+                            changes: [.init(path: path, value: .object(["payload": .object(["broken": .string("kept")])]))])
+    let right = SyncRevision(id: "right", workspaceID: "templates", deviceID: "right", parents: ["root"], createdAt: TemplateFixture.now,
+                             changes: [.init(path: path, value: original)])
+    let merged = try SyncMerge.merge(revisions: [root, right, left], workspaceID: "templates")
+    #expect(merged.planningIsValid && merged.pausedItemIDs.isEmpty)
+    #expect(merged.conflicts.contains { $0.paths.contains(path) })
+    #expect(merged.workspace.projectTemplate(id: id)?.canInstantiate == false)
+    var candidate = merged.workspace; let before = candidate
+    #expect(throws: CoreError.self) { try TemplateFixture.instantiate(&candidate, id) }
+    #expect(candidate == before)
+    let partialID = "partial"
+    let partial = SyncRevision(id: "partial-root", workspaceID: "templates", deviceID: "wire", parents: [], createdAt: TemplateFixture.now,
+                              changes: [.init(path: .init(collection: "projectTemplates", entityID: partialID, field: "@exists"), value: .bool(true))])
+    let result = try SyncMerge.merge(revisions: [partial], workspaceID: "templates")
+    #expect(result.planningIsValid && result.workspace.projectTemplate(id: partialID)?.canInstantiate == false)
+}
+
+@Test func templateLargeSnapshotAndCreationScaleWithoutRepeatedGlobalScans() throws {
+    func workload(_ count: Int) throws -> (Duration, Int) {
+        var w = Workspace(projects: [Project(id: "p", name: "Large")], nodes: [Node(id: "n", projectID: "p", name: "Parallel")],
+            items: (0..<count).map { WorkItem(id: "i-\($0)", name: "Work \($0)", nodeID: "n", projectIDs: ["p"], remainingMinutes: 2) })
+        let clock = ContinuousClock(), start = clock.now
+        let id = try TemplateFixture.save(&w)
+        let created = try TemplateFixture.instantiate(&w, id)
+        let elapsed = start.duration(to: clock.now)
+        #expect(w.items.filter { $0.projectIDs == [created] }.count == count)
+        #expect(w.dependencies.isEmpty)
+        #expect(w.history.count == count + 2)
+        #expect(w.estimateRevisions?.count == count)
+        return (elapsed, try JSONEncoder().encode(w.projectTemplate(id: id)?.payload).count)
+    }
+    let small = try workload(1_000), large = try workload(4_000)
+    // Four times the content must not grow quadratically. Generous fixed noise allowance avoids brittle timing.
+    #expect(large.0 < small.0 * 12 + .seconds(1))
+    #expect(large.1 < small.1 * 5)
+}
+
+@Test func templateMissingBlockerAndExternalFollowUpAreExplicitAndDoNotTrap() throws {
+    var w = TemplateFixture.base
+    w.nodes[0].blockerIDs = ["missing"]
+    w.dependencies = [Dependency(source: .blocker("missing"), targetItemID: "direct")]
+    let preview = w.previewProjectTemplate(projectID: "p")
+    #expect(!preview.canSave && preview.errors.contains { $0.code == .missingBlocker })
+    w.projects.append(Project(id: "external-p", name: "External"))
+    w.items.append(WorkItem(id: "external", name: "External work", projectIDs: ["external-p"], remainingMinutes: 5))
+    w.blockers = [Blocker(id: "missing", name: "Waiting", expectedDurationMinutes: 15, followUpItemID: "external")]
+    let resolved = w.previewProjectTemplate(projectID: "p")
+    #expect(resolved.canSave && resolved.warnings.contains { $0.code == .clearedExternalFollowUp })
+    #expect(resolved.payload?.blockers.first?.followUpItemID == nil)
+    w.items[3].isArchived = true
+    #expect(w.previewProjectTemplate(projectID: "p").warnings.contains { $0.code == .excludedScope && $0.objectID == "direct" })
+    #expect(w.previewProjectTemplate(projectID: "p").errors.contains { $0.code == .externalDependency })
+}
+
+@Test func templateArchiveLifecycleAndConflictQuarantinePersistWithoutSyntheticSyncEdits() throws {
+    var w = TemplateFixture.base
+    let id = try TemplateFixture.save(&w)
+    try w.archiveProjectTemplate(templateID: id, now: TemplateFixture.now)
+    #expect(w.availableProjectTemplates().isEmpty)
+    #expect(w.availableProjectTemplates(includeArchived: true).count == 1)
+    #expect(w.projectTemplate(id: id)?.archivedAt == TemplateFixture.now)
+    #expect(throws: CoreError.self) { try TemplateFixture.instantiate(&w, id) }
+    try w.archiveProjectTemplate(templateID: id, isArchived: false, now: TemplateFixture.now.addingTimeInterval(1))
+    #expect(w.projectTemplate(id: id)?.canInstantiate == true)
+    let original = try SyncDocument(w, choice: nil)
+    w.projectTemplates?[0].availabilityIssue = "Unresolved content conflict"
+    let roundTrip = try JSONDecoder().decode(Workspace.self, from: JSONEncoder().encode(w))
+    #expect(roundTrip.projectTemplate(id: id)?.canInstantiate == false)
+    #expect(roundTrip.projectTemplate(id: id)?.availabilityIssue == "Unresolved content conflict")
+    #expect(SyncDocument.changes(from: original, to: try SyncDocument(roundTrip, choice: nil)).isEmpty)
+}

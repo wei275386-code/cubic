@@ -1,0 +1,35 @@
+.DS_Store
+.build/
+DerivedData/
+DerivedData*/
+*.xcuserstate
+xcuserdata/
+.xcodebuildmcp/
+
+*.app/
+
+*.xcresult/
+*.xcarchive/
+*.xctestproducts/
+
+# Regenerable Python QA helper bytecode
+__pycache__/
+*.pyc
+
+# Generated Xcode build directories, including QA-specific names.
+**/*DerivedData*/
+
+# Local release candidates and private operator inputs.
+release-output/
+config/release.local.env
+config/release-devices.local.json
+config/*.mobileprovision
+
+# Local development data lives in ~/Library/Application Support/CubicProjectData/.
+# Ignore both directories and compatibility symlinks.
+/evidence
+/.scratch
+/.lody
+
+# Local project documentation and QA records.
+/docs/

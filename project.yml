@@ -1,0 +1,145 @@
+name: Cubic
+options:
+  bundleIdPrefix: local.liwei
+  developmentLanguage: zh-Hans
+  deploymentTarget:
+    iOS: '26.0'
+    macOS: '26.0'
+  xcodeVersion: '26.3'
+settings:
+  base:
+    SWIFT_VERSION: '6.0'
+    DEVELOPMENT_TEAM: 25CFD853PL
+    CODE_SIGN_STYLE: Automatic
+    CUBIC_CLOUDKIT_CAPABILITY: disabled
+  configs:
+    Debug:
+      CUBIC_CLOUDKIT_CAPABILITY: development
+    Release:
+      CUBIC_CLOUDKIT_CAPABILITY: disabled
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) CUBIC_RELEASE
+packages:
+  CubicCore:
+    path: Core
+targets:
+  Cubic:
+    type: application
+    platform: iOS
+    sources: [CubicApp]
+    info:
+      path: CubicApp/Info.plist
+      properties:
+        CubicCloudKitCapability: $(CUBIC_CLOUDKIT_CAPABILITY)
+        CubicBuildConfiguration: $(CONFIGURATION)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        NSCalendarsFullAccessUsageDescription: Cubic 读取你选择的日历占用，并可在你指定的 Cubic 日历中创建、更新和删除工作时间块。其他日历不会被 Cubic 自动修改。
+    dependencies:
+      - package: CubicCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: local.liwei.Cubic
+        TARGETED_DEVICE_FAMILY: '1'
+        MARKETING_VERSION: '0.2.0'
+        CURRENT_PROJECT_VERSION: '2'
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CUBIC_CLOUD_ENTITLEMENTS: ''
+        CODE_SIGN_ENTITLEMENTS: $(CUBIC_CLOUD_ENTITLEMENTS)
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Cubic
+        INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription: Cubic 读取你选择的日历占用，并可在你指定的 Cubic 日历中创建、更新和删除工作时间块。其他日历不会被 Cubic 自动修改。
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+  CubicUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [CubicUITests]
+    dependencies:
+      - target: Cubic
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription: Cubic QA creates and removes only its own temporary calendar to test Calendar integration.
+  CubicMac:
+    type: application
+    platform: macOS
+    sources:
+      - path: CubicApp
+        excludes: [CubicApp.swift, Info.plist, CubicCloud.entitlements]
+      - path: CubicMac
+        excludes: [Info.plist, CubicMac.entitlements]
+    info:
+      path: CubicMac/Info.plist
+      properties:
+        CFBundleDisplayName: Cubic
+        CFBundleName: Cubic
+        CubicCloudKitCapability: $(CUBIC_CLOUDKIT_CAPABILITY)
+        CubicBuildConfiguration: $(CONFIGURATION)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSApplicationCategoryType: public.app-category.productivity
+        NSCalendarsFullAccessUsageDescription: Cubic 读取你选择的日历占用，并可在你指定的 Cubic 日历中创建、更新和删除工作时间块。其他日历不会被 Cubic 自动修改。
+    dependencies:
+      - package: CubicCore
+    settings:
+      base:
+        PRODUCT_NAME: Cubic
+        PRODUCT_BUNDLE_IDENTIFIER: local.liwei.CubicMac
+        MARKETING_VERSION: '0.2.0'
+        CURRENT_PROJECT_VERSION: '2'
+        ASSETCATALOG_COMPILER_APPICON_NAME: MacAppIcon
+        CODE_SIGN_ENTITLEMENTS: CubicMac/CubicMac.entitlements
+        ENABLE_HARDENED_RUNTIME: YES
+        GENERATE_INFOPLIST_FILE: YES
+  CubicMacUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources: [CubicMacUITests]
+    dependencies:
+      - target: CubicMac
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+  CubicAppTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: CubicApp
+        excludes: [CubicApp.swift, Info.plist, CubicCloud.entitlements, PrivacyInfo.xcprivacy]
+      - path: Tests/App
+    dependencies:
+      - package: CubicCore
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGNING_ALLOWED: NO
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+schemes:
+  CubicArchitecture:
+    build:
+      targets:
+        CubicAppTests: all
+    test:
+      config: Debug
+      targets: [CubicAppTests]
+  CubicMac:
+    build:
+      targets:
+        CubicMac: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets: [CubicMacUITests]
+  Cubic:
+    build:
+      targets:
+        Cubic: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets: [CubicUITests]
