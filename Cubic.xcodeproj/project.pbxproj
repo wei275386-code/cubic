@@ -44,6 +44,7 @@
 		2C591CA040C55849A8B094B5 /* FileSyncAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E6DD45C117C58C3140A06A7 /* FileSyncAccess.swift */; };
 		2D03D960B001A17C5C8B825A /* ActionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94BD104189C7023C5C24C1E6 /* ActionsView.swift */; };
 		2E6FFC97D373162391A2D993 /* ProjectViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E328E82C158FE94E5F19DD8 /* ProjectViews.swift */; };
+		315FA4DA4743859279455205 /* NotificationRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BAF3DAA787C2FF11677118E /* NotificationRegressionTests.swift */; };
 		34C1B23BC31DCD67A959D525 /* ProjectTemplateViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF1521040E65B71B906A1EC2 /* ProjectTemplateViews.swift */; };
 		36238C8DEE5FB8E20F3A6A13 /* Design.swift in Sources */ = {isa = PBXBuildFile; fileRef = B253D876365A5D3B8501767D /* Design.swift */; };
 		379B98744970972D27FA97EC /* CoreError+Localized.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29424640CDD70EF10C2C9172 /* CoreError+Localized.swift */; };
@@ -56,6 +57,7 @@
 		4650BB72BB498B38D147F7FE /* CalendarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 743C1F260060202FE82B6445 /* CalendarView.swift */; };
 		47F9E7B6D0D840E6196A0911 /* CloudSyncEntitlements.swift in Sources */ = {isa = PBXBuildFile; fileRef = 716F87874BA21664BE60F842 /* CloudSyncEntitlements.swift */; };
 		496A63BF3FC15CC08125E6E2 /* CloudSyncController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2159F72342953EF0116B9E4D /* CloudSyncController.swift */; };
+		4CEADD5EC5CCE700F457713F /* ArchitectureOperationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85E1F4334BE338D023F2CB81 /* ArchitectureOperationTests.swift */; };
 		4D542BD9767D38694918CE44 /* ProjectViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E328E82C158FE94E5F19DD8 /* ProjectViews.swift */; };
 		4F04DC92A48D7EBC35041589 /* SystemServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9F068D5736792C9B00E7655 /* SystemServices.swift */; };
 		533FB775AC6990D1407C5989 /* PlanningChoiceConfirmation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6288575D6BB951DBFBF3FFAD /* PlanningChoiceConfirmation.swift */; };
@@ -159,6 +161,7 @@
 		1662CEB47C3FD22D2E2F825E /* OptimizationUXTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OptimizationUXTests.swift; sourceTree = "<group>"; };
 		176C902D6C74C94AF17B1DF0 /* ReleaseClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReleaseClientTests.swift; sourceTree = "<group>"; };
 		19D451D34F66AA89A5CDE411 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		1BAF3DAA787C2FF11677118E /* NotificationRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationRegressionTests.swift; sourceTree = "<group>"; };
 		1EEAAA72F5C98A3826B90EA1 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		2159F72342953EF0116B9E4D /* CloudSyncController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudSyncController.swift; sourceTree = "<group>"; };
 		258B67A7DC2ADB58872498A9 /* NoticeViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoticeViews.swift; sourceTree = "<group>"; };
@@ -187,6 +190,7 @@
 		7FCF612C1DF13B69BE1A8023 /* CalendarTimelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarTimelineView.swift; sourceTree = "<group>"; };
 		81562C0507FF743482074F3C /* CalendarSyncSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarSyncSettingsTests.swift; sourceTree = "<group>"; };
 		85132610BF81324E1C37B03C /* Editors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Editors.swift; sourceTree = "<group>"; };
+		85E1F4334BE338D023F2CB81 /* ArchitectureOperationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArchitectureOperationTests.swift; sourceTree = "<group>"; };
 		8B94743C13945B320C22464D /* PlatformSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlatformSupport.swift; sourceTree = "<group>"; };
 		8C04FA019405635F907C70B5 /* Preferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Preferences.swift; sourceTree = "<group>"; };
 		8E6DD45C117C58C3140A06A7 /* FileSyncAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileSyncAccess.swift; sourceTree = "<group>"; };
@@ -331,6 +335,8 @@
 			isa = PBXGroup;
 			children = (
 				E73949784C511A19CA7802F2 /* AppModelArchitectureTests.swift */,
+				85E1F4334BE338D023F2CB81 /* ArchitectureOperationTests.swift */,
+				1BAF3DAA787C2FF11677118E /* NotificationRegressionTests.swift */,
 				176C902D6C74C94AF17B1DF0 /* ReleaseClientTests.swift */,
 			);
 			name = App;
@@ -556,6 +562,7 @@
 				8F4EB3402766F7C97DEF610B /* ActionsView.swift in Sources */,
 				CC90076CD2CFF459992465A2 /* AppModel.swift in Sources */,
 				B3D349AABF67DA4226AF3D1C /* AppModelArchitectureTests.swift in Sources */,
+				4CEADD5EC5CCE700F457713F /* ArchitectureOperationTests.swift in Sources */,
 				0CB88EDAAED6B8F88883749A /* CalendarBridge.swift in Sources */,
 				C5A059296EA277D14D716149 /* CalendarIntegrationViews.swift in Sources */,
 				64425B6CA102939FA67D8C2C /* CalendarTimelineView.swift in Sources */,
@@ -571,6 +578,7 @@
 				B80E76D322EB484A1315C275 /* HistoryFactDetails.swift in Sources */,
 				296C8A8150D5DC9F0D223FD4 /* ModalMessages.swift in Sources */,
 				178602D81C21B19CDCA5A105 /* NoticeViews.swift in Sources */,
+				315FA4DA4743859279455205 /* NotificationRegressionTests.swift in Sources */,
 				CCD524E7D47DDE6255676423 /* PlanningChoiceConfirmation.swift in Sources */,
 				0C7C5B8D718CC84DC8852882 /* PlanningExplanationViews.swift in Sources */,
 				091813AA459143E364714E20 /* PlatformSupport.swift in Sources */,
