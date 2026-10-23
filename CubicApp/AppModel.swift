@@ -172,8 +172,8 @@ import CubicCore
         return Workspace(
             projects: [Project(id: "qa-project", name: "QA 工作删除与日历", deadline: deadline, importance: 5, planningCompleteness: .complete)],
             nodes: [Node(id: "qa-node", projectID: "qa-project", name: "QA 交付")],
-            items: [WorkItem(id: "qa-drag", name: "QA 拖拽时间块", nodeID: "qa-node", projectIDs: ["qa-project"], remainingMinutes: 45),
-                    WorkItem(id: "qa-delete", name: "QA 删除工作", nodeID: "qa-node", projectIDs: ["qa-project"], remainingMinutes: 30),
+            items: [WorkItem(id: "qa-delete", name: "QA 删除工作", nodeID: "qa-node", projectIDs: ["qa-project"], remainingMinutes: 30),
+                    WorkItem(id: "qa-drag", name: "QA 拖拽时间块", nodeID: "qa-node", projectIDs: ["qa-project"], remainingMinutes: 45),
                     WorkItem(id: "qa-keep", name: "QA 保留工作", nodeID: "qa-node", projectIDs: ["qa-project"], remainingMinutes: 30)],
             dependencies: [Dependency(id: "qa-delete-to-keep", source: .item("qa-delete"), targetItemID: "qa-keep", createdAt: now, effectiveAt: now)]
         )
