@@ -7,7 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		0148B8E83E22FC620D7D112E /* ReleaseCapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 331F7E8FE271269C0C0B0BC8 /* ReleaseCapabilities.swift */; };
 		06E5A00905E909FFBCBBD78A /* CloudSyncController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2159F72342953EF0116B9E4D /* CloudSyncController.swift */; };
 		07B672C561154D97F249049A /* CalendarTimelineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FCF612C1DF13B69BE1A8023 /* CalendarTimelineView.swift */; };
 		091813AA459143E364714E20 /* PlatformSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B94743C13945B320C22464D /* PlatformSupport.swift */; };
@@ -50,12 +49,10 @@
 		379B98744970972D27FA97EC /* CoreError+Localized.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29424640CDD70EF10C2C9172 /* CoreError+Localized.swift */; };
 		392C0769C33D75045212D63C /* CalendarBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F819213C6FA8CEFFE62A652 /* CalendarBridge.swift */; };
 		3CE960261A11CA44E98F7C8C /* NativeCalendarTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1377A8FCDDA455AE10B74F55 /* NativeCalendarTests.swift */; };
-		3E1AB140B3A092C97F14D287 /* CloudSyncAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A21BC2570E021B76A1D41B6 /* CloudSyncAdapter.swift */; };
 		4074845577387A1021CABAEB /* CoreError+Localized.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29424640CDD70EF10C2C9172 /* CoreError+Localized.swift */; };
 		420012A2ACBAEAFE88C0DA74 /* Preferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C04FA019405635F907C70B5 /* Preferences.swift */; };
 		45E41E30579C680921ACF3AA /* WorkspaceSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = C443240BB0EF1D107539A10A /* WorkspaceSession.swift */; };
 		4650BB72BB498B38D147F7FE /* CalendarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 743C1F260060202FE82B6445 /* CalendarView.swift */; };
-		47F9E7B6D0D840E6196A0911 /* CloudSyncEntitlements.swift in Sources */ = {isa = PBXBuildFile; fileRef = 716F87874BA21664BE60F842 /* CloudSyncEntitlements.swift */; };
 		496A63BF3FC15CC08125E6E2 /* CloudSyncController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2159F72342953EF0116B9E4D /* CloudSyncController.swift */; };
 		4CEADD5EC5CCE700F457713F /* ArchitectureOperationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85E1F4334BE338D023F2CB81 /* ArchitectureOperationTests.swift */; };
 		4D542BD9767D38694918CE44 /* ProjectViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E328E82C158FE94E5F19DD8 /* ProjectViews.swift */; };
@@ -72,29 +69,27 @@
 		5E3F388AFAB06CD3D13A7969 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19D451D34F66AA89A5CDE411 /* SettingsView.swift */; };
 		62A88FBCB3CFE627B3FF8EAC /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40774D9BC03C37639B792A36 /* AppModel.swift */; };
 		64425B6CA102939FA67D8C2C /* CalendarTimelineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FCF612C1DF13B69BE1A8023 /* CalendarTimelineView.swift */; };
-		69D3F935B58927F88A567E69 /* CloudSyncAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A21BC2570E021B76A1D41B6 /* CloudSyncAdapter.swift */; };
 		6C94C0099EE3B62DC9FCB1D5 /* HistoryFactDetails.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA3FB1CA32BBE3A3AA8AB36B /* HistoryFactDetails.swift */; };
 		6CDDF2D9154663CEBDFD9D2C /* RiskNotices.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EBC743C145882D48DC08CB6 /* RiskNotices.swift */; };
 		6FAB2EE5D59E4467C568E567 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 72AE392F70046F4314590FDB /* Assets.xcassets */; };
 		72C63AF6C9857FFA97CC147F /* FileSyncAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E6DD45C117C58C3140A06A7 /* FileSyncAccess.swift */; };
 		76DB7768CEAA3EA238388D18 /* ReviewViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3DB76A6437B4E8E9A18B117 /* ReviewViews.swift */; };
+		770832E010CE48A628D5F671 /* AppVersion.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA10F5A8EB7A87D4F54E040D /* AppVersion.swift */; };
 		7B326636D4964AB3BFCFDD6F /* ProjectStructureEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E7B24D5C79AA6E6C66CCB6F /* ProjectStructureEditorView.swift */; };
 		7C031DFB014A25B2BDC16B22 /* FileSyncAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E6DD45C117C58C3140A06A7 /* FileSyncAccess.swift */; };
 		7CE865D227971AE71EA12AB9 /* CalendarTimelineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FCF612C1DF13B69BE1A8023 /* CalendarTimelineView.swift */; };
 		7F99A94279C777A6BA907A10 /* SyncViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD33821D6AD5B7905A295230 /* SyncViews.swift */; };
-		8202F7A75D7F898177EDA616 /* CloudSyncEntitlements.swift in Sources */ = {isa = PBXBuildFile; fileRef = 716F87874BA21664BE60F842 /* CloudSyncEntitlements.swift */; };
 		82463A037B203A66227920F3 /* Design.swift in Sources */ = {isa = PBXBuildFile; fileRef = B253D876365A5D3B8501767D /* Design.swift */; };
 		87FA3ABB677FF5026B7D79D9 /* ReviewViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3DB76A6437B4E8E9A18B117 /* ReviewViews.swift */; };
 		88D884BE56335F75060004DC /* ProjectStructureEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E7B24D5C79AA6E6C66CCB6F /* ProjectStructureEditorView.swift */; };
 		8F4EB3402766F7C97DEF610B /* ActionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94BD104189C7023C5C24C1E6 /* ActionsView.swift */; };
+		904984435764678E9C9EB89F /* AppVersion.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA10F5A8EB7A87D4F54E040D /* AppVersion.swift */; };
 		91F513F88D51473E2C3F5FFD /* CalendarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 743C1F260060202FE82B6445 /* CalendarView.swift */; };
 		94A97EB62A19D597D182B056 /* ActionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94BD104189C7023C5C24C1E6 /* ActionsView.swift */; };
 		9601DE71645E3D68E9DC4FD1 /* TrialView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 645202CFFE4E86C3DE390D21 /* TrialView.swift */; };
 		96D54D8DF20760C7167875A9 /* ProjectTemplateViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF1521040E65B71B906A1EC2 /* ProjectTemplateViews.swift */; };
 		97177B55B525936F6F60575D /* CalendarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 743C1F260060202FE82B6445 /* CalendarView.swift */; };
-		99ACA6A281AD0CF6678B5D57 /* CloudSyncAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A21BC2570E021B76A1D41B6 /* CloudSyncAdapter.swift */; };
 		99FC4A351CEAB4F7DCD87A3C /* Editors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85132610BF81324E1C37B03C /* Editors.swift */; };
-		9ADA21AFB76548CEB23DBEE6 /* ReleaseCapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 331F7E8FE271269C0C0B0BC8 /* ReleaseCapabilities.swift */; };
 		A21DD76BD4363C16B9D94550 /* ArchitectureWorkflowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7B47E339409D38811B00A99 /* ArchitectureWorkflowTests.swift */; };
 		A6FD76EE044E2117C99A5316 /* ModalMessages.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA4AFE17B44157DE42522AB0 /* ModalMessages.swift */; };
 		A95AFA199D643B73E8FF4F8D /* ModalMessages.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA4AFE17B44157DE42522AB0 /* ModalMessages.swift */; };
@@ -115,7 +110,6 @@
 		CC90076CD2CFF459992465A2 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40774D9BC03C37639B792A36 /* AppModel.swift */; };
 		CCD524E7D47DDE6255676423 /* PlanningChoiceConfirmation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6288575D6BB951DBFBF3FFAD /* PlanningChoiceConfirmation.swift */; };
 		D02FD24776540767F2A2F3DE /* SystemServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9F068D5736792C9B00E7655 /* SystemServices.swift */; };
-		D1307C982C8A106ADB709423 /* ReleaseClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 176C902D6C74C94AF17B1DF0 /* ReleaseClientTests.swift */; };
 		D1FADCCA937F3AC0E7D39E4E /* RiskNotices.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EBC743C145882D48DC08CB6 /* RiskNotices.swift */; };
 		D2C6D26999BDC22CF5D3936E /* CloudSyncController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2159F72342953EF0116B9E4D /* CloudSyncController.swift */; };
 		D3B446B194B20B062CFB4261 /* CubicApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37F822F47D820640201761B4 /* CubicApp.swift */; };
@@ -123,14 +117,13 @@
 		D4CAC428760EC91A39749CAF /* WorkDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F5A879B53A17722426ABCA9 /* WorkDetailView.swift */; };
 		D9F967713173F172917D91AA /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1EEAAA72F5C98A3826B90EA1 /* Assets.xcassets */; };
 		DB2E51881A0082501CA7E808 /* PlatformSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B94743C13945B320C22464D /* PlatformSupport.swift */; };
-		EB374B3DA73949A5FC306C97 /* CloudSyncEntitlements.swift in Sources */ = {isa = PBXBuildFile; fileRef = 716F87874BA21664BE60F842 /* CloudSyncEntitlements.swift */; };
 		EBEF0D65681B141F0EB71FE1 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1EEAAA72F5C98A3826B90EA1 /* Assets.xcassets */; };
 		ED38F5B0436B6679AF2E57EE /* RiskNotices.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EBC743C145882D48DC08CB6 /* RiskNotices.swift */; };
 		EDE93EAEEB1CF30E5F7CF741 /* ProjectTemplateViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF1521040E65B71B906A1EC2 /* ProjectTemplateViews.swift */; };
 		EF9030A8F78532ECCBEE29BA /* HistoryFactDetails.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA3FB1CA32BBE3A3AA8AB36B /* HistoryFactDetails.swift */; };
+		EFFFA3413642A1004CB1BF10 /* AppVersion.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA10F5A8EB7A87D4F54E040D /* AppVersion.swift */; };
 		F156B9E36D37A9A156B597B2 /* Preferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C04FA019405635F907C70B5 /* Preferences.swift */; };
 		F249E2795AA693715D320EFB /* Design.swift in Sources */ = {isa = PBXBuildFile; fileRef = B253D876365A5D3B8501767D /* Design.swift */; };
-		F4BA421B1CCC00A1CA04A09B /* ReleaseCapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 331F7E8FE271269C0C0B0BC8 /* ReleaseCapabilities.swift */; };
 		F587E5746040F962ABDA2AFD /* PlanningChoiceConfirmation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6288575D6BB951DBFBF3FFAD /* PlanningChoiceConfirmation.swift */; };
 		FEC6F8792BCCCFB5470E17A1 /* RelationshipViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C197A00019F424D06DA52E4 /* RelationshipViews.swift */; };
 /* End PBXBuildFile section */
@@ -159,21 +152,18 @@
 		1377A8FCDDA455AE10B74F55 /* NativeCalendarTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCalendarTests.swift; sourceTree = "<group>"; };
 		149AFA174056C9E7B0ADE57C /* PlanningExplanationViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanningExplanationViews.swift; sourceTree = "<group>"; };
 		1662CEB47C3FD22D2E2F825E /* OptimizationUXTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OptimizationUXTests.swift; sourceTree = "<group>"; };
-		176C902D6C74C94AF17B1DF0 /* ReleaseClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReleaseClientTests.swift; sourceTree = "<group>"; };
 		19D451D34F66AA89A5CDE411 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		1BAF3DAA787C2FF11677118E /* NotificationRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationRegressionTests.swift; sourceTree = "<group>"; };
 		1EEAAA72F5C98A3826B90EA1 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		2159F72342953EF0116B9E4D /* CloudSyncController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudSyncController.swift; sourceTree = "<group>"; };
 		258B67A7DC2ADB58872498A9 /* NoticeViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoticeViews.swift; sourceTree = "<group>"; };
 		29424640CDD70EF10C2C9172 /* CoreError+Localized.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CoreError+Localized.swift"; sourceTree = "<group>"; };
-		331F7E8FE271269C0C0B0BC8 /* ReleaseCapabilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReleaseCapabilities.swift; sourceTree = "<group>"; };
 		332CD4C5A1CB8A17A14B1A02 /* ProjectTemplateFinalUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectTemplateFinalUITests.swift; sourceTree = "<group>"; };
 		34EF1A23BC556BC4EFAA168E /* WorkCalendarDragTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkCalendarDragTests.swift; sourceTree = "<group>"; };
 		37F822F47D820640201761B4 /* CubicApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CubicApp.swift; sourceTree = "<group>"; };
 		3E7AA0B7AF4017462FBDF0ED /* CubicMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CubicMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		40774D9BC03C37639B792A36 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		42C97C9B13D14B21937019F8 /* CubicUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = CubicUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		471FD6F1A887145F6CE62525 /* CubicCloud.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = CubicCloud.entitlements; sourceTree = "<group>"; };
 		48DB084AB259088845C4819E /* MacCompanionSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacCompanionSyncTests.swift; sourceTree = "<group>"; };
 		4C197A00019F424D06DA52E4 /* RelationshipViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelationshipViews.swift; sourceTree = "<group>"; };
 		4CEB44834DA668EAB3D85E59 /* Cubic.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Cubic.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -182,10 +172,8 @@
 		645202CFFE4E86C3DE390D21 /* TrialView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrialView.swift; sourceTree = "<group>"; };
 		693B6F0C0AA47B6005B85F71 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		6F819213C6FA8CEFFE62A652 /* CalendarBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarBridge.swift; sourceTree = "<group>"; };
-		716F87874BA21664BE60F842 /* CloudSyncEntitlements.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudSyncEntitlements.swift; sourceTree = "<group>"; };
 		72AE392F70046F4314590FDB /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		743C1F260060202FE82B6445 /* CalendarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarView.swift; sourceTree = "<group>"; };
-		7A21BC2570E021B76A1D41B6 /* CloudSyncAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudSyncAdapter.swift; sourceTree = "<group>"; };
 		7F5A879B53A17722426ABCA9 /* WorkDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkDetailView.swift; sourceTree = "<group>"; };
 		7FCF612C1DF13B69BE1A8023 /* CalendarTimelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarTimelineView.swift; sourceTree = "<group>"; };
 		81562C0507FF743482074F3C /* CalendarSyncSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarSyncSettingsTests.swift; sourceTree = "<group>"; };
@@ -207,6 +195,7 @@
 		C6C084BE36E1ADB97923C5C1 /* Core */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Core; path = Core; sourceTree = SOURCE_ROOT; };
 		D7B47E339409D38811B00A99 /* ArchitectureWorkflowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArchitectureWorkflowTests.swift; sourceTree = "<group>"; };
 		D9F068D5736792C9B00E7655 /* SystemServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemServices.swift; sourceTree = "<group>"; };
+		DA10F5A8EB7A87D4F54E040D /* AppVersion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppVersion.swift; sourceTree = "<group>"; };
 		DA3FB1CA32BBE3A3AA8AB36B /* HistoryFactDetails.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryFactDetails.swift; sourceTree = "<group>"; };
 		E73949784C511A19CA7802F2 /* AppModelArchitectureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModelArchitectureTests.swift; sourceTree = "<group>"; };
 		EA4AFE17B44157DE42522AB0 /* ModalMessages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModalMessages.swift; sourceTree = "<group>"; };
@@ -278,18 +267,16 @@
 			children = (
 				94BD104189C7023C5C24C1E6 /* ActionsView.swift */,
 				40774D9BC03C37639B792A36 /* AppModel.swift */,
+				DA10F5A8EB7A87D4F54E040D /* AppVersion.swift */,
 				1EEAAA72F5C98A3826B90EA1 /* Assets.xcassets */,
 				6F819213C6FA8CEFFE62A652 /* CalendarBridge.swift */,
 				BC1D0F725FB1873AE2DD7515 /* CalendarIntegrationViews.swift */,
 				7FCF612C1DF13B69BE1A8023 /* CalendarTimelineView.swift */,
 				743C1F260060202FE82B6445 /* CalendarView.swift */,
 				F50E9B5EC89AD3EFE8A83A4D /* CapacitySettingsView.swift */,
-				7A21BC2570E021B76A1D41B6 /* CloudSyncAdapter.swift */,
 				2159F72342953EF0116B9E4D /* CloudSyncController.swift */,
-				716F87874BA21664BE60F842 /* CloudSyncEntitlements.swift */,
 				29424640CDD70EF10C2C9172 /* CoreError+Localized.swift */,
 				37F822F47D820640201761B4 /* CubicApp.swift */,
-				471FD6F1A887145F6CE62525 /* CubicCloud.entitlements */,
 				B253D876365A5D3B8501767D /* Design.swift */,
 				85132610BF81324E1C37B03C /* Editors.swift */,
 				8E6DD45C117C58C3140A06A7 /* FileSyncAccess.swift */,
@@ -306,7 +293,6 @@
 				FF1521040E65B71B906A1EC2 /* ProjectTemplateViews.swift */,
 				0E328E82C158FE94E5F19DD8 /* ProjectViews.swift */,
 				4C197A00019F424D06DA52E4 /* RelationshipViews.swift */,
-				331F7E8FE271269C0C0B0BC8 /* ReleaseCapabilities.swift */,
 				B3DB76A6437B4E8E9A18B117 /* ReviewViews.swift */,
 				0EBC743C145882D48DC08CB6 /* RiskNotices.swift */,
 				19D451D34F66AA89A5CDE411 /* SettingsView.swift */,
@@ -337,7 +323,6 @@
 				E73949784C511A19CA7802F2 /* AppModelArchitectureTests.swift */,
 				85E1F4334BE338D023F2CB81 /* ArchitectureOperationTests.swift */,
 				1BAF3DAA787C2FF11677118E /* NotificationRegressionTests.swift */,
-				176C902D6C74C94AF17B1DF0 /* ReleaseClientTests.swift */,
 			);
 			name = App;
 			path = Tests/App;
@@ -562,15 +547,14 @@
 				8F4EB3402766F7C97DEF610B /* ActionsView.swift in Sources */,
 				CC90076CD2CFF459992465A2 /* AppModel.swift in Sources */,
 				B3D349AABF67DA4226AF3D1C /* AppModelArchitectureTests.swift in Sources */,
+				904984435764678E9C9EB89F /* AppVersion.swift in Sources */,
 				4CEADD5EC5CCE700F457713F /* ArchitectureOperationTests.swift in Sources */,
 				0CB88EDAAED6B8F88883749A /* CalendarBridge.swift in Sources */,
 				C5A059296EA277D14D716149 /* CalendarIntegrationViews.swift in Sources */,
 				64425B6CA102939FA67D8C2C /* CalendarTimelineView.swift in Sources */,
 				91F513F88D51473E2C3F5FFD /* CalendarView.swift in Sources */,
 				BA125980491832F96CD0B587 /* CapacitySettingsView.swift in Sources */,
-				99ACA6A281AD0CF6678B5D57 /* CloudSyncAdapter.swift in Sources */,
 				D2C6D26999BDC22CF5D3936E /* CloudSyncController.swift in Sources */,
-				EB374B3DA73949A5FC306C97 /* CloudSyncEntitlements.swift in Sources */,
 				379B98744970972D27FA97EC /* CoreError+Localized.swift in Sources */,
 				F249E2795AA693715D320EFB /* Design.swift in Sources */,
 				B685F88B37B423ACD2915425 /* Editors.swift in Sources */,
@@ -587,8 +571,6 @@
 				34C1B23BC31DCD67A959D525 /* ProjectTemplateViews.swift in Sources */,
 				4D542BD9767D38694918CE44 /* ProjectViews.swift in Sources */,
 				FEC6F8792BCCCFB5470E17A1 /* RelationshipViews.swift in Sources */,
-				9ADA21AFB76548CEB23DBEE6 /* ReleaseCapabilities.swift in Sources */,
-				D1307C982C8A106ADB709423 /* ReleaseClientTests.swift in Sources */,
 				87FA3ABB677FF5026B7D79D9 /* ReviewViews.swift in Sources */,
 				ED38F5B0436B6679AF2E57EE /* RiskNotices.swift in Sources */,
 				C2527E547811C0066119150B /* SettingsView.swift in Sources */,
@@ -621,14 +603,13 @@
 			files = (
 				94A97EB62A19D597D182B056 /* ActionsView.swift in Sources */,
 				62A88FBCB3CFE627B3FF8EAC /* AppModel.swift in Sources */,
+				EFFFA3413642A1004CB1BF10 /* AppVersion.swift in Sources */,
 				2B80E45AA821845EA2BF2B78 /* CalendarBridge.swift in Sources */,
 				147651C0DA32FA8114EEEA64 /* CalendarIntegrationViews.swift in Sources */,
 				07B672C561154D97F249049A /* CalendarTimelineView.swift in Sources */,
 				4650BB72BB498B38D147F7FE /* CalendarView.swift in Sources */,
 				BCCAB75806D441DAE57B2280 /* CapacitySettingsView.swift in Sources */,
-				3E1AB140B3A092C97F14D287 /* CloudSyncAdapter.swift in Sources */,
 				06E5A00905E909FFBCBBD78A /* CloudSyncController.swift in Sources */,
-				8202F7A75D7F898177EDA616 /* CloudSyncEntitlements.swift in Sources */,
 				4074845577387A1021CABAEB /* CoreError+Localized.swift in Sources */,
 				D3B446B194B20B062CFB4261 /* CubicApp.swift in Sources */,
 				82463A037B203A66227920F3 /* Design.swift in Sources */,
@@ -645,7 +626,6 @@
 				EDE93EAEEB1CF30E5F7CF741 /* ProjectTemplateViews.swift in Sources */,
 				2E6FFC97D373162391A2D993 /* ProjectViews.swift in Sources */,
 				C0AE256151D8B5F0B7F31E60 /* RelationshipViews.swift in Sources */,
-				F4BA421B1CCC00A1CA04A09B /* ReleaseCapabilities.swift in Sources */,
 				76DB7768CEAA3EA238388D18 /* ReviewViews.swift in Sources */,
 				D1FADCCA937F3AC0E7D39E4E /* RiskNotices.swift in Sources */,
 				09FAE3E04F813C089B5ABAF1 /* SettingsView.swift in Sources */,
@@ -671,14 +651,13 @@
 			files = (
 				2D03D960B001A17C5C8B825A /* ActionsView.swift in Sources */,
 				1BCAE0EC6E113125804137B8 /* AppModel.swift in Sources */,
+				770832E010CE48A628D5F671 /* AppVersion.swift in Sources */,
 				392C0769C33D75045212D63C /* CalendarBridge.swift in Sources */,
 				593E8F123C520E17CF8B4AAC /* CalendarIntegrationViews.swift in Sources */,
 				7CE865D227971AE71EA12AB9 /* CalendarTimelineView.swift in Sources */,
 				97177B55B525936F6F60575D /* CalendarView.swift in Sources */,
 				0A5C3FF64A1A7E3F2DE3875B /* CapacitySettingsView.swift in Sources */,
-				69D3F935B58927F88A567E69 /* CloudSyncAdapter.swift in Sources */,
 				496A63BF3FC15CC08125E6E2 /* CloudSyncController.swift in Sources */,
-				47F9E7B6D0D840E6196A0911 /* CloudSyncEntitlements.swift in Sources */,
 				1F2B8CD19FE7AF51B8E37115 /* CoreError+Localized.swift in Sources */,
 				5D32964C1927442FC6960462 /* CubicMacApp.swift in Sources */,
 				36238C8DEE5FB8E20F3A6A13 /* Design.swift in Sources */,
@@ -695,7 +674,6 @@
 				96D54D8DF20760C7167875A9 /* ProjectTemplateViews.swift in Sources */,
 				AA65D3C19CAEA4E73205277D /* ProjectViews.swift in Sources */,
 				0AF26558A113599A337C7A6E /* RelationshipViews.swift in Sources */,
-				0148B8E83E22FC620D7D112E /* ReleaseCapabilities.swift in Sources */,
 				5C1E139CD2AD03D8E6F886DC /* ReviewViews.swift in Sources */,
 				6CDDF2D9154663CEBDFD9D2C /* RiskNotices.swift in Sources */,
 				5E3F388AFAB06CD3D13A7969 /* SettingsView.swift in Sources */,
@@ -785,9 +763,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = "$(CUBIC_CLOUD_ENTITLEMENTS)";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CUBIC_CLOUD_ENTITLEMENTS = "";
 				CURRENT_PROJECT_VERSION = 2;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = CubicApp/Info.plist;
@@ -861,7 +837,6 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CUBIC_CLOUDKIT_CAPABILITY = development;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 25CFD853PL;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -1000,7 +975,6 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CUBIC_CLOUDKIT_CAPABILITY = disabled;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 25CFD853PL;
 				ENABLE_NS_ASSERTIONS = NO;
@@ -1018,7 +992,6 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) CUBIC_RELEASE";
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 6.0;
@@ -1029,9 +1002,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = "$(CUBIC_CLOUD_ENTITLEMENTS)";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CUBIC_CLOUD_ENTITLEMENTS = "";
 				CURRENT_PROJECT_VERSION = 2;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = CubicApp/Info.plist;

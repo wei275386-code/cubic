@@ -18,10 +18,6 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
-	<key>CubicBuildConfiguration</key>
-	<string>$(CONFIGURATION)</string>
-	<key>CubicCloudKitCapability</key>
-	<string>$(CUBIC_CLOUDKIT_CAPABILITY)</string>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
 	<key>NSCalendarsFullAccessUsageDescription</key>
