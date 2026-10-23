@@ -125,8 +125,8 @@ import Testing
         try w.addDependency(Dependency(id:"a-m",source:.item("a"),targetItemID:"merge"),now:PRD.t)
         #expect(w.dependencies.contains { $0.isActive && $0.source == .item("b") && $0.targetItemID == "merge" })
         let p = try PRD.plan(w)
-        #expect(p.legacy.availableActions.contains { $0.itemID == "a" })
-        #expect(!p.legacy.availableActions.contains { $0.itemID == "b" || $0.itemID == "merge" })
+        #expect(p.summary.availableActions.contains { $0.itemID == "a" })
+        #expect(!p.summary.availableActions.contains { $0.itemID == "b" || $0.itemID == "merge" })
         try w.completeItem(id:"a",now:PRD.at(1))
         #expect(throws: CoreError.self) { try w.startItem(id:"merge",now:PRD.at(2)) }
         let old = w
@@ -158,8 +158,8 @@ import Testing
         var w = nodeWorkspace(); w.blockers = [Blocker(id:"global",name:"entry",state:.active,expectedResolution:PRD.at(60),triggeredAt:PRD.t)]
         w.nodes[0].blockerIDs = ["global"]
         let p = try PRD.plan(w)
-        #expect(p.legacy.itemStates.allSatisfy { $0.isBlocked })
-        #expect(p.legacy.availableActions.isEmpty)
+        #expect(p.summary.itemStates.allSatisfy { $0.isBlocked })
+        #expect(p.summary.availableActions.isEmpty)
         #expect(p.witness.allocations.allSatisfy { $0.start >= PRD.at(60) })
         #expect(throws: CoreError.self) { try Engine.trial(workspace:w,request:PlanningTrialRequest(itemID:"a",minutes:20),input:PlanningInput(slots:[PRD.slot(0,120)],now:PRD.t)) }
         let cf = try Engine.trial(workspace:w,request:PlanningTrialRequest(itemID:"a",minutes:20,counterfactual:true),input:PlanningInput(slots:[PRD.slot(0,120)],now:PRD.t))
@@ -243,10 +243,10 @@ import Testing
             dependencies:[Dependency(id:"u-o",source:.item("up"),targetItemID:"old"),Dependency(id:"o-n",source:.item("old"),targetItemID:"new")])
         try w.validate()
         #expect(!w.sourceSatisfied(.item("old")))
-        #expect(try PRD.plan(w).legacy.itemStates.first { $0.itemID == "new" }?.isBlocked == true)
+        #expect(try PRD.plan(w).summary.itemStates.first { $0.itemID == "new" }?.isBlocked == true)
         try w.reviewItem(id:"old",outcome:.stillValid,now:PRD.at(1))
         #expect(w.sourceSatisfied(.item("old"))); #expect(!w.sourceSatisfied(.item("up")))
-        #expect(try PRD.plan(w).legacy.itemStates.first { $0.itemID == "new" }?.isBlocked == false)
+        #expect(try PRD.plan(w).summary.itemStates.first { $0.itemID == "new" }?.isBlocked == false)
         try w.reworkItem(id:"up",remainingMinutes:15,now:PRD.at(2))
         #expect(!w.sourceSatisfied(.item("old")))
         #expect(w.items[1].status == .completed && w.items[1].needsReview)

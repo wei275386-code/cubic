@@ -30,7 +30,7 @@ import Testing
         try w.correctWorkSession(id:session.id,replacement:corrected,now:PRD.at(31))
         try w.correctEstimateBaseline(itemID:"a",baseline:.preStart,minutes:55,now:PRD.at(32),note:"typo")
         let trial = try Engine.trial(workspace:w,request:PlanningTrialRequest(itemID:"b",minutes:30),input:PRD.abcInput)
-        let stored = TrialResult(selections:[TrialSelection(itemID:"b",minutes:30)],allocations:trial.allocations,unallocatedMinutes:0,snapshot:try #require(trial.scenario).legacy,planning:trial)
+        let stored = TrialResult(selections:[TrialSelection(itemID:"b",minutes:30)],allocations:trial.allocations,unallocatedMinutes:0,snapshot:try #require(trial.scenario).summary,planning:trial)
         try w.chooseNextAction(itemID:"b",now:PRD.at(33),trial:stored,displayedItemIDs:["a","b"],dataVersion:"v2",impactWasVerified:true)
         let loaded = try persistedCopy(w)
         #expect(loaded == w); #expect(loaded.effortSummary().confirmedMinutes == 20)

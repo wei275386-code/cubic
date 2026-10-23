@@ -73,7 +73,7 @@ import Testing
         #expect(w.acceptanceResults?.contains { $0.acceptanceID == "node-gate" && $0.state == .accepted } == true)
         let input = PlanningInput(slots: [CapacitySlot(start: at(30), end: at(240))], now: at(30))
         let plan = try Engine.plan(workspace: w, input: input)
-        #expect(plan.legacy.itemStates.first { $0.itemID == "future" }?.isBlocked == true)
+        #expect(plan.summary.itemStates.first { $0.itemID == "future" }?.isBlocked == true)
     }
 
     // R2: a stillValid review distinguishes consumed round 1 from checked context round 2.
@@ -354,12 +354,12 @@ import Testing
         try w.triggerBlocker(id: "quote", now: at(0))
         let input = PlanningInput(slots: [CapacitySlot(start: at(1), end: at(240))], now: at(1))
         let waiting = try Engine.plan(workspace: w, input: input)
-        #expect(waiting.legacy.itemStates.allSatisfy { $0.isBlocked })
-        #expect(waiting.legacy.availableActions.isEmpty)
+        #expect(waiting.summary.itemStates.allSatisfy { $0.isBlocked })
+        #expect(waiting.summary.availableActions.isEmpty)
         try w.resolveBlocker(id: "quote", now: at(1))
         let ready = try Engine.plan(workspace: w, input: input)
-        #expect(Set(ready.legacy.availableActions.map(\.itemID)) == Set(["a", "b", "c"]))
-        #expect(ready.legacy.itemStates.allSatisfy { !$0.isBlocked })
+        #expect(Set(ready.summary.availableActions.map(\.itemID)) == Set(["a", "b", "c"]))
+        #expect(ready.summary.itemStates.allSatisfy { !$0.isBlocked })
         #expect(w.blockers.count == 1)
         #expect(w.history.filter { $0.kind == .blockerResolved && $0.objectID == "quote" }.count == 1)
         for id in ["a", "b", "c"] { try w.completeItem(id: id, now: at(2)) }
@@ -387,7 +387,7 @@ import Testing
         #expect(w.projects[0].deadlineIsDateOnly == true && w.projects[0].deadlineTimeZoneID == input.1)
         #expect(w.history.last?.kind == .deadlineChanged && w.history.last?.objectID == "P")
         let capacity = try Engine.plan(workspace: w, input: PlanningInput(slots: [CapacitySlot(start: start, end: nextMidnight)], now: start))
-        #expect(capacity.legacy.capacityMinutes == input.4)
+        #expect(capacity.summary.capacityMinutes == input.4)
         let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .millisecondsSince1970
         let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .millisecondsSince1970
         var restored = try decoder.decode(Workspace.self, from: encoder.encode(w))

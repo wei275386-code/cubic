@@ -10,7 +10,7 @@ import Testing
                 nodes: [Node(id: "n", projectID: "p", name: "n", planningCompleteness: completeness)],
                 items: [WorkItem(id: "x", name: "x", nodeID: "n", projectIDs: ["p"], remainingMinutes: 20)],
                 acceptances: [Acceptance(id: "g", subject: .node("n"), name: "g")])
-            let plan = try PRD.plan(workspace, options: PlanningOptions(projectScopeComplete: ["p": false], nodeScopeComplete: ["n": false]))
+            let plan = try PRD.plan(workspace)
             #expect(plan.projects.first?.scopeComplete == true)
             #expect(plan.projects.first?.totalDemandMinutes == 20)
             #expect(!plan.unknowns.contains { $0.objectID == "p" || $0.objectID == "n" })

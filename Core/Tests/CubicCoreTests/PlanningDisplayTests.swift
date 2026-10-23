@@ -95,11 +95,11 @@ import Testing
         #expect(groups.flatMap(\.proofs).count == original.count)
         #expect(plan.certificates == original)
         let index = PlanningDisplay.certificatesByRisk(original)
-        for risk in PlanningDisplay.risks(plan.legacy.risks) where risk.shortageMinutes != nil {
+        for risk in PlanningDisplay.risks(plan.summary.risks) where risk.shortageMinutes != nil {
             let linked = try #require(index[PlanningDisplay.riskKey(risk)])
             #expect(linked.flatMap(\.proofs).allSatisfy { $0.message == risk.message })
         }
-        print("DISPLAY_EXPIRED raw=\(original.count) grouped=\(groups.count) risks=\(plan.legacy.risks.count)/\(PlanningDisplay.risks(plan.legacy.risks).count)")
+        print("DISPLAY_EXPIRED raw=\(original.count) grouped=\(groups.count) risks=\(plan.summary.risks.count)/\(PlanningDisplay.risks(plan.summary.risks).count)")
     }
     @Test func realFutureTrialKeepsItsOwnPremisesAndDoesNotMutateWorkspace() throws {
         let w = Workspace(projects: [Project(id: "p", name: "Future", deadline: t.addingTimeInterval(3600), planningCompleteness: .complete),
@@ -189,7 +189,7 @@ import Testing
             blockers: [Blocker(id: "wait", name: "External confirmation", state: .active, expectedResolution: t.addingTimeInterval(1800), triggeredAt: t)],
             dependencies: [Dependency(id: "wait-a", source: .blocker("wait"), targetItemID: "a")])
         let plan = try Engine.plan(workspace: w, input: PlanningInput(slots: [CapacitySlot(start: t, end: t.addingTimeInterval(3600))], now: t))
-        let conditional = plan.legacy.risks.filter { $0.kind == .conditionalUnlock }
+        let conditional = plan.summary.risks.filter { $0.kind == .conditionalUnlock }
         #expect(!conditional.isEmpty)
         #expect(!plan.certificates.isEmpty)
         let index = PlanningDisplay.certificatesByRisk(plan.certificates)

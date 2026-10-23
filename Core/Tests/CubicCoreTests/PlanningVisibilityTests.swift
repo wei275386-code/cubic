@@ -45,10 +45,10 @@ import Testing
     @Test func archiveRestoreUsesCurrentVisibilityWithUnchangedEngineSnapshot() throws {
         var w = workspace()
         let plan = try PRD.plan(w, [PRD.slot(0, 60)])
-        #expect(plan.legacy.risks.contains { $0.projectID == "old" })
-        #expect(!visibility(w).risks(plan.legacy.risks, certificates: plan.certificates, unknowns: plan.unknowns).contains { $0.projectID == "old" })
+        #expect(plan.summary.risks.contains { $0.projectID == "old" })
+        #expect(!visibility(w).risks(plan.summary.risks, certificates: plan.certificates, unknowns: plan.unknowns).contains { $0.projectID == "old" })
         try w.setProjectArchived(id: "old", archived: false, now: PRD.t)
-        #expect(visibility(w).risks(plan.legacy.risks, certificates: plan.certificates, unknowns: plan.unknowns).contains { $0.projectID == "old" })
+        #expect(visibility(w).risks(plan.summary.risks, certificates: plan.certificates, unknowns: plan.unknowns).contains { $0.projectID == "old" })
         try w.setProjectArchived(id: "old", archived: true, now: PRD.at(1))
         #expect(try PRD.plan(w, [PRD.slot(0, 60)]).committedDemandMinutes == plan.committedDemandMinutes)
     }

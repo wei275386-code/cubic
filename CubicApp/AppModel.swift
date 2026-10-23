@@ -451,7 +451,7 @@ import CubicCore
             }.value
             guard revision == requestRevision, generation == refreshGeneration, planningContextRevision == requestContext else { return }
             planning = result
-            snapshot = result.legacy
+            snapshot = result.summary
             calculationUpdatedAt = date
             calculationIsStale = false
             serviceIssues["排期未能更新"] = nil
@@ -463,24 +463,6 @@ import CubicCore
             let message = "\(error.localizedDescription) 请检查相关设置后下拉刷新。已有工作记录保留。"
             serviceIssues["排期未能更新"] = message
             if !background { reportFailure("排期未能更新", message: message, context: messageContext) }
-        }
-    }
-    func trial(itemID: String, minutes: Int) async -> TrialResult? {
-        let messageContext = messageContextVersion
-        let version = sourceVersion
-        let date = Date()
-        let input = await calculationInput(date: date)
-        do {
-            var result = try await Task.detached(priority: .userInitiated) {
-                try Engine.trial(workspace: input.workspace, selections: [TrialSelection(itemID: itemID, minutes: minutes)], slots: input.slots, now: date)
-            }.value
-            guard sourceVersion == version else { return nil }
-            markMissingCalendar(&result.snapshot)
-            return result
-        } catch {
-            guard sourceVersion == version else { return nil }
-            reportFailure("试算未完成", message: "\(error.localizedDescription) 请调整试算内容后重试。", context: messageContext)
-            return nil
         }
     }
     private func markMissingCalendar(_ result: inout EngineSnapshot) {
@@ -669,7 +651,7 @@ import CubicCore
         let scenario = result.scenario ?? result.baseline
         let savedTrial = result.request.minutes.map { minutes in
             TrialResult(selections: [TrialSelection(itemID: result.request.itemID, minutes: minutes)], allocations: result.allocations,
-                        unallocatedMinutes: result.unallocatedMinutes ?? 0, snapshot: scenario.legacy)
+                        unallocatedMinutes: result.unallocatedMinutes ?? 0, snapshot: scenario.summary)
         }
         let ids = Array(Set([result.request.itemID] + result.impacts.flatMap(\.itemIDs))).sorted()
         let version = sourceVersion

@@ -28,9 +28,6 @@ public struct PlanningWait: Codable, Sendable, Equatable {
 public struct PlanningOptions: Codable, Sendable, Equatable {
     public var capacityVerified: Bool
     public var capacityNote: String?
-    /// Legacy captured values retained for decoding older trials; current planning uses the as-is structure.
-    public var projectScopeComplete: [String: Bool]
-    public var nodeScopeComplete: [String: Bool]
     public var requiredItemIDs: [String: Bool]
     public var requiredNodeIDs: [String: Bool]
     public var committedProjectIDs: [String: Bool]
@@ -41,13 +38,11 @@ public struct PlanningOptions: Codable, Sendable, Equatable {
     /// Caps expensive interval proofs; skipped proofs are never treated as successful schedules.
     public var maximumIntervalChecks: Int
     public init(capacityVerified: Bool = true, capacityNote: String? = nil,
-                projectScopeComplete: [String: Bool] = [:], nodeScopeComplete: [String: Bool] = [:],
                 requiredItemIDs: [String: Bool] = [:], requiredNodeIDs: [String: Bool] = [:],
                 committedProjectIDs: [String: Bool] = [:], itemDeadlines: [String: Date] = [:],
                 warningMargins: [String: Int] = [:], manualGateDates: [String: Date] = [:],
                 waits: [PlanningWait] = [], maximumIntervalChecks: Int = 100_000) {
         self.capacityVerified = capacityVerified; self.capacityNote = capacityNote
-        self.projectScopeComplete = projectScopeComplete; self.nodeScopeComplete = nodeScopeComplete
         self.requiredItemIDs = requiredItemIDs; self.requiredNodeIDs = requiredNodeIDs
         self.committedProjectIDs = committedProjectIDs; self.itemDeadlines = itemDeadlines
         self.warningMargins = warningMargins; self.manualGateDates = manualGateDates
@@ -180,7 +175,7 @@ public struct PlanningCertificate: Codable, Sendable, Equatable {
 }
 public struct PlanningSnapshot: Codable, Sendable, Equatable {
     public var source: PlanningSource
-    public var legacy: EngineSnapshot
+    public var summary: EngineSnapshot
     public var knownDemandMinutes: Int
     /// Only these demands are forced by real deadlines; undated known work stays visible above.
     public var committedDemandMinutes: Int
@@ -192,7 +187,7 @@ public struct PlanningSnapshot: Codable, Sendable, Equatable {
     public var certificates: [PlanningCertificate]
     /// Candidate failure or unknown premises identify a decision set, without asserting an impossible schedule.
     public var unprovenCompetitions: [PlanningImpact]
-    public var feasibility: Feasibility { legacy.feasibility }
+    public var feasibility: Feasibility { summary.feasibility }
 }
 
 public struct PlanningTrialRequest: Codable, Sendable, Equatable {

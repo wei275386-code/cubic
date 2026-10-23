@@ -12,12 +12,12 @@ import Testing
         let original = workspace
         let current = try PRD.plan(workspace)
         #expect(!current.unknowns.contains { $0.objectID == "old" })
-        #expect(current.legacy.availableActions.contains { $0.itemID == "optional" })
+        #expect(current.summary.availableActions.contains { $0.itemID == "optional" })
         #expect(workspace == original)
         workspace.dependencies[0].removedAt = nil
         let reconnected = try PRD.plan(workspace)
         #expect(reconnected.unknowns.contains { $0.objectID == "old" })
-        #expect(!reconnected.legacy.availableActions.contains { $0.itemID == "optional" })
+        #expect(!reconnected.summary.availableActions.contains { $0.itemID == "optional" })
     }
 
     @Test func currentUndatedProjectReminderSurvivesButCancelledProjectReminderDoesNot() throws {

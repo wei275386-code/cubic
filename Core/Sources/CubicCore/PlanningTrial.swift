@@ -9,7 +9,7 @@ extension Engine {
         try checkMinutes(request.minutes, "planning.trial.minutes"); try checkDate(request.start, "planning.trial.start")
         if let minutes = request.minutes, minutes <= 0 { throw CoreError.invalid("试算时长必须为正，未选择时长使用 nil") }
         if let start = request.start, start < input.now || start >= input.horizonEnd { throw CoreError.invalid("试算开始位置不在未来规划窗口") }
-        let state = baseline.legacy.itemStates.first { $0.itemID == item.id }
+        let state = baseline.summary.itemStates.first { $0.itemID == item.id }
         guard state?.isBlocked != true || request.counterfactual else {
             throw CoreError.blocked("当前前置或复核未就绪。请先处理前置，或明确选择反事实假设；真实工作仍受阻。")
         }
@@ -99,7 +99,7 @@ extension Engine {
         }
         if allocations.isEmpty && productive > 0 {
             scenario.witness.isComplete = false
-            if scenario.legacy.feasibility == .feasible { scenario.legacy.feasibility = .undetermined }
+            if scenario.summary.feasibility == .feasible { scenario.summary.feasibility = .undetermined }
         }
         var impacts: [PlanningImpact] = []
         impacts.append(impact(kind: .sharedProgress, projects: impactedProjects, items: [item.id],

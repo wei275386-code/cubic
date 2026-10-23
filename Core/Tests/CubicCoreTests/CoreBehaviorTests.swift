@@ -9,7 +9,7 @@ private func slots(_ minutes: Int = 90) -> [CapacitySlot] { [CapacitySlot(start:
 @Test func abcGoldenTrialAndElapsedActualWork() throws {
     var workspace = Workspace.demo(now: origin)
     let original = workspace
-    let trial = try Engine.trial(workspace: workspace, selections: [TrialSelection(itemID: "item-a", minutes: 60)], slots: slots(), now: origin)
+    let trial = try Engine.trial(workspace: workspace, selection: TrialSelection(itemID: "item-a", minutes: 60), slots: slots(), now: origin)
     #expect(workspace == original)
     #expect(trial.unallocatedMinutes == 0)
     #expect(trial.snapshot.capacityMinutes == 30)
@@ -155,11 +155,11 @@ private func slots(_ minutes: Int = 90) -> [CapacitySlot] { [CapacitySlot(start:
     let workspace = Workspace(items: [WorkItem(id: "x", name: "未定期限", remainingMinutes: 100)])
     let result = try Engine.evaluate(workspace: workspace, slots: [], now: origin)
     #expect(result.feasibility == .undetermined)
-    let trial = try Engine.trial(workspace: workspace, selections: [TrialSelection(itemID: "x", minutes: 100)], slots: [], now: origin)
+    let trial = try Engine.trial(workspace: workspace, selection: TrialSelection(itemID: "x", minutes: 100), slots: [], now: origin)
     #expect(trial.unallocatedMinutes == 100)
     #expect(trial.snapshot.feasibility == .undetermined)
     #expect(throws: CoreError.self) {
-        try Engine.trial(workspace: Workspace.demo(now: origin), selections: [TrialSelection(itemID: "item-c", minutes: 5)], slots: slots(), now: origin)
+        try Engine.trial(workspace: Workspace.demo(now: origin), selection: TrialSelection(itemID: "item-c", minutes: 5), slots: slots(), now: origin)
     }
 }
 
@@ -189,10 +189,10 @@ private func slots(_ minutes: Int = 90) -> [CapacitySlot] { [CapacitySlot(start:
     let workspace = Workspace(projects: [Project(id: "p", name: "项目", deadline: date(60), planningCompleteness: .complete)],
                               items: [WorkItem(id: "x", name: "连续工作", projectIDs: ["p"], remainingMinutes: 40, requiresContinuous: true)])
     // PRD D13: keep the partial trial visible and unallocated; do not claim completion.
-    let partial = try Engine.trial(workspace: workspace, selections: [TrialSelection(itemID: "x", minutes: 20)], slots: slots(60), now: origin)
+    let partial = try Engine.trial(workspace: workspace, selection: TrialSelection(itemID: "x", minutes: 20), slots: slots(60), now: origin)
     #expect(partial.allocations.isEmpty)
     #expect(partial.unallocatedMinutes == 20)
-    let result = try Engine.trial(workspace: workspace, selections: [TrialSelection(itemID: "x", minutes: 40)], slots: slots(60), now: origin)
+    let result = try Engine.trial(workspace: workspace, selection: TrialSelection(itemID: "x", minutes: 40), slots: slots(60), now: origin)
     #expect(result.unallocatedMinutes == 0)
     #expect(result.allocations.count == 1)
 }

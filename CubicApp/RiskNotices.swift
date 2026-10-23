@@ -207,7 +207,7 @@ enum RiskNoticeEngine {
         for blocker in workspace.blockers where blocker.state == .resolved {
             guard let resolved = blocker.resolvedAt, now.timeIntervalSince(resolved) < 86400 else { continue }
             let affected = workspace.affectedItemIDs(by: .blocker(blocker.id))
-            let ready = planning.legacy.availableActions.map(\.itemID).filter { affected.contains($0) && visibility.itemIDs.contains($0) }
+            let ready = planning.summary.availableActions.map(\.itemID).filter { affected.contains($0) && visibility.itemIDs.contains($0) }
             guard !ready.isEmpty else { continue }
             let projects = Set(workspace.items.filter { ready.contains($0.id) }.flatMap(\.projectIDs).filter { visibility.projectIDs.contains($0) })
             add(id: "unlock.\(blocker.id).\(blocker.currentRound)", root: blocker.id, kind: "unlock", title: "条件已解除：\(blocker.name)",
