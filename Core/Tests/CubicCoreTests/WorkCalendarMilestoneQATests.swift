@@ -8,10 +8,6 @@ private func wcSlot(_ start: Int = 0, _ end: Int = 240, energy: Energy = .normal
     CapacitySlot(start: wcDate(start), end: wcDate(end), energy: energy)
 }
 
-private func wcRevision(_ workspace: Workspace, old: Workspace? = nil, id: String, parents: [String] = [], device: String = "qa") throws -> SyncRevision {
-    try .recording(workspace: workspace, comparedTo: old, id: id, workspaceID: "work-calendar-qa", deviceID: device, parents: parents, createdAt: wcNow)
-}
-
 private func assertTimeBlockRejected(_ original: Workspace, _ block: WorkTimeBlock, slots: [CapacitySlot], busy: [BusyInterval] = [], sourceLocation: SourceLocation = #_sourceLocation) {
     var draft = original
     #expect(throws: (any Error).self, sourceLocation: sourceLocation) { try draft.setTimeBlock(block, slots: slots, busy: busy, now: wcNow) }
@@ -19,7 +15,7 @@ private func assertTimeBlockRejected(_ original: Workspace, _ block: WorkTimeBlo
 }
 
 @Suite(.serialized) struct WorkCalendarMilestoneQATests {
-    @Test func deleteItemAtomicallyRemovesOperableIdentityAndKeepsHistoryAcrossStorageAndMerge() async throws {
+    @Test func deleteItemAtomicallyRemovesOperableIdentityAndKeepsHistoryAcrossStorage() throws {
         var workspace = Workspace(
             projects: [Project(id: "p", name: "Primary", deadline: wcDate(240), status: .completed, completedAt: wcDate(-20)),
                        Project(id: "q", name: "Shared", deadline: wcDate(240))],
@@ -67,33 +63,12 @@ private func assertTimeBlockRejected(_ original: Workspace, _ block: WorkTimeBlo
         #expect(throws: (any Error).self) { try workspace.chooseNextAction(itemID: "delete-me", now: wcNow) }
         #expect(throws: (any Error).self) { try workspace.reworkItem(id: "delete-me", remainingMinutes: 10, now: wcNow) }
 
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("CubicWorkCalendarDeleteQA-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let url = directory.appendingPathComponent("workspace.sqlite")
-        let repository = try SQLiteWorkspaceRepository(url: url)
-        try repository.save(workspace)
-        #expect(try SQLiteWorkspaceRepository(url: url).load() == workspace)
-        let export = directory.appendingPathComponent("backup.json")
-        try repository.export(to: export)
-        let imported = try SQLiteWorkspaceRepository(url: directory.appendingPathComponent("import.sqlite"))
-        #expect(try imported.importWorkspace(from: export) == workspace)
+        #expect(try persistedCopy(workspace) == workspace)
 
         let legacyJSON = #"{"schemaVersion":1,"projects":[],"nodes":[],"items":[],"blockers":[],"dependencies":[],"acceptances":[],"history":[],"decisions":[],"workSessions":[]}"#
         let legacy = try JSONDecoder().decode(Workspace.self, from: Data(legacyJSON.utf8))
         #expect(legacy.deletedItems == nil && legacy.timeBlocks == nil)
         try legacy.validate()
-
-        let root = try wcRevision(before, id: "root")
-        var deleted = before; try deleted.deleteItem(id: "delete-me", now: wcNow)
-        var edited = before; edited.items[0].name = "Concurrent zombie edit"
-        let merged = try SyncMerge.merge(revisions: [root,
-                                                     wcRevision(deleted, old: before, id: "delete", parents: ["root"], device: "left"),
-                                                     wcRevision(edited, old: before, id: "edit", parents: ["root"], device: "right")],
-                                         workspaceID: "work-calendar-qa")
-        #expect(!merged.workspace.items.contains { $0.id == "delete-me" })
-        #expect(merged.workspace.deletedItems?.contains { $0.id == "delete-me" } == true)
-        #expect(merged.planningWorkspace.items.map(\.id).contains("delete-me") == false)
-        #expect(merged.conflicts.contains { $0.kind == .deletionReference && $0.message.contains("不重新进入工作列表") })
     }
 
     @Test func timeBlockValidationIsAtomicAndCoversCalendarConstraints() throws {

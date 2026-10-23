@@ -1,68 +1,5 @@
 import SwiftUI
 import CubicCore
-import CryptoKit
-
-private actor WorkspaceStore {
-    private var repository: SQLiteWorkspaceRepository?
-    private let url: URL
-    init(url: URL) { self.url = url }
-    func load(now: Date) throws -> (Workspace, Bool) {
-        let first = !FileManager.default.fileExists(atPath: url.path)
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let repo = try SQLiteWorkspaceRepository(url: url)
-        repository = repo
-        if first {
-            // A new installation is ready to receive the user's real workspace.
-            // Samples must never become local facts that a later binding uploads.
-            try repo.save(.empty)
-            return (.empty, true)
-        }
-        return (try repo.load(), false)
-    }
-    func save(_ workspace: Workspace) throws {
-        guard let repository else { throw BackupError.unsupported }
-        try repository.save(workspace)
-    }
-}
-private struct AppBackup: Sendable {
-    var schemaVersion = 2
-    var workspace: Workspace
-    var preferences: UserPreferences
-    var syncArchive: SyncArchive?
-}
-
-private extension AppBackup {
-    enum CodingKeys: String, CodingKey { case schemaVersion, workspace, preferences, syncArchive, syncArchiveDateEncoding }
-}
-extension AppBackup: Codable {
-    init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
-        workspace = try container.decode(Workspace.self, forKey: .workspace)
-        preferences = try container.decode(UserPreferences.self, forKey: .preferences)
-        let archiveEncoding = try container.decodeIfPresent(String.self, forKey: .syncArchiveDateEncoding)
-        if archiveEncoding == "deferredToDate" {
-            let value = try container.decode(SyncValue.self, forKey: .syncArchive)
-            syncArchive = try SyncCoding.decode(SyncArchive.self, from: SyncCoding.encode(value))
-        } else {
-            guard archiveEncoding == nil else { throw BackupError.unsupported }
-            // Earlier v1/v2 envelopes use the outer milliseconds strategy.
-            syncArchive = try container.decodeIfPresent(SyncArchive.self, forKey: .syncArchive)
-        }
-    }
-    func encode(to encoder: any Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(schemaVersion, forKey: .schemaVersion)
-        try container.encode(workspace, forKey: .workspace)
-        try container.encode(preferences, forKey: .preferences)
-        if let syncArchive {
-            // Preserve operation dates bit-for-bit in their canonical reference epoch.
-            let value = try SyncCoding.decode(SyncValue.self, from: SyncCoding.encode(syncArchive))
-            try container.encode(value, forKey: .syncArchive)
-            try container.encode("deferredToDate", forKey: .syncArchiveDateEncoding)
-        }
-    }
-}
 
 @MainActor @Observable final class AppModel {
     var workspace = Workspace.empty { didSet { cachedProjectScopes = nil; cachedItemProjects = nil; cachedBusinessNames = nil } }
@@ -103,11 +40,8 @@ extension AppBackup: Codable {
     /// 旧数据重新解释的一次性提示；确认后写偏好并不再显示。
     var acceptanceNotice: String?
     var openingNoticeID: String?
-    var cloudSync: CloudSyncController?
     var calendarBridge: CalendarBridge?
-    private var calendarBridgePartition: String?
     private var calendarBridgeGeneration = 0
-    private var syncControllerGeneration = 0
     private var externalCalendarInputRevision = 0
     private var calendarPreferencesRevision = 0
     private var externalCalendarSnapshot = CalendarSnapshot() {
@@ -119,24 +53,21 @@ extension AppBackup: Codable {
             }
         }
     }
-    private var calendarStorageReady: Bool { !loading && syncJournal != nil && syncStorageError == nil && pendingLocalSave == nil && canVerifyPlanning }
+    private var calendarStorageReady: Bool { !loading && store != nil }
     private var calendarIntegrationSourceVersion: String {
         "\(revision):\(planningContextRevision):\(calendarPreferencesRevision):\(externalCalendarInputRevision):\(calendarBridgeGeneration):\(calendarBridge?.boundCalendarID ?? ""):\(calendarStorageReady)"
     }
-    var syncStatus: SyncStatus { cloudSync?.status ?? SyncStatus(phase: syncStorageError == nil ? .localOnly : .failed,
-        message: syncStorageError ?? "本地数据已保存，正在准备同步。") }
-    private var syncProjection: SyncMergeResult?
-    private var deferredSyncProjection: SyncMergeResult?
-    private var workspaceSession: WorkspaceSession?
-    private var pendingLocalSave: SyncLocalCommitFailure?
-    private var recoveryBlockedHosts: Set<UUID> = []
-    private var currentEditorHost: UUID? { modalMessageHosts.last ?? messagePages.last }
+    private(set) var syncState = SyncState()
+    private var store: WorkspaceStore?
+    /// Version of the published `workspace`; saves based on an older version are rejected.
+    private var documentVersion: String?
+    @ObservationIgnored private var syncLoop: Task<Void, Never>?
+    private var syncing = false
+    private var syncAgain = false
     @ObservationIgnored private var writeWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
-    private var syncJournal: SyncJournal?
-    nonisolated private static var syncWorkspaceID: String { workCalendarQAMode ? "cubic.work-calendar.qa" : "cubic.primary" }
+    nonisolated private static var calendarBridgeID: String { workCalendarQAMode ? "cubic.work-calendar.qa.local" : "cubic.primary.local" }
     #if DEBUG
     @ObservationIgnored private var testingDefaults: UserDefaults?
-    @ObservationIgnored private var testingSyncRoot: URL?
     @ObservationIgnored private var isIntegrationTest = false
     #endif
     private var syncDefaults: UserDefaults {
@@ -145,15 +76,11 @@ extension AppBackup: Codable {
         #endif
         return Self.workCalendarQAMode ? UserDefaults(suiteName: "cubic.work-calendar.qa.sync")! : .standard
     }
-    private var activeSyncPartition: String?
-    private var activeSyncKind = "local"
-    var syncTransportLabel: String { activeSyncKind == "file" ? "文件目录同步" : "仅本机" }
     var fileSyncConnection: FileSyncConnection? {
-        guard let data = syncDefaults.data(forKey: "cubic.sync.fileConnection") else { return nil }
+        guard let data = syncDefaults.data(forKey: "cubic.sync.folder") else { return nil }
         return try? JSONDecoder().decode(FileSyncConnection.self, from: data)
     }
-    var syncDirectoryLabel: String? { activeSyncKind == "file" ? fileSyncConnection?.directoryLabel : nil }
-    private var syncStorageError: String?
+    var syncDirectoryLabel: String? { fileSyncConnection?.directoryLabel }
     var loading = true
     var loadFailure: String?
     var saving = false
@@ -170,7 +97,6 @@ extension AppBackup: Codable {
     var calendar = CalendarSnapshot() { didSet { calendarSnapshotRevision += 1 } }
     private var calendarSnapshotRevision = 0
     private var planningContextRevision = 0
-    var canVerifyPlanning: Bool { syncProjection?.planningIsValid != false }
     var now = Date()
     var visibleCapacitySlots: [CapacitySlot] = []
     var isRefreshing = false
@@ -181,7 +107,7 @@ extension AppBackup: Codable {
     private var loaded = false
     private var revision = 0
     private var refreshGeneration = 0
-    private let store: WorkspaceStore
+    private let storeURL: URL
     nonisolated private static var workCalendarQAMode: Bool {
         #if DEBUG
         ProcessInfo.processInfo.arguments.contains("-CubicWorkCalendarQA")
@@ -208,27 +134,21 @@ extension AppBackup: Codable {
                 try? FileManager.default.removeItem(at: qaDirectory)
                 UserDefaults(suiteName: "cubic.work-calendar.qa.sync")?.removePersistentDomain(forName: "cubic.work-calendar.qa.sync")
             }
-            store = WorkspaceStore(url: qaDirectory.appendingPathComponent("work-calendar.sqlite"))
+            storeURL = qaDirectory.appendingPathComponent("work-calendar.json")
             preferences = syncDefaults.data(forKey: "cubic.preferences") == nil ? Self.workCalendarQAPreferences(now: Date()) : UserPreferences.load(defaults: syncDefaults)
         } else {
-            store = WorkspaceStore(url: documents.appendingPathComponent("Cubic/workspace.sqlite"))
+            storeURL = documents.appendingPathComponent("Cubic/workspace.json")
         }
     }
     #if DEBUG
-    /// Isolated composition seam for testing the REAL AppModel adapter; never touches Documents or system services.
-    init(testDirectory: URL, journal: SyncJournal, projection: SyncMergeResult, defaults: UserDefaults,
-         beforeCacheSave: (@Sendable (Workspace) async throws -> Void)? = nil) async throws {
-        store = WorkspaceStore(url: testDirectory.appendingPathComponent("workspace.sqlite"))
-        testingDefaults = defaults; testingSyncRoot = testDirectory.appendingPathComponent("Sync")
+    /// Isolated composition seam for testing the REAL AppModel; never touches Documents or system services.
+    init(testDirectory: URL, defaults: UserDefaults, workspace: Workspace = .empty) async throws {
+        storeURL = testDirectory.appendingPathComponent("workspace.json")
+        testingDefaults = defaults
         isIntegrationTest = true
-        _ = try await store.load(now: Date())
-        try await store.save(projection.planningWorkspace)
-        workspace = projection.planningWorkspace; syncProjection = projection; syncJournal = journal
-        workspaceSession = WorkspaceSession(journal: journal, cacheProjection: { [store] value in
-            if let beforeCacheSave { try await beforeCacheSave(value) }
-            try await store.save(value)
-        })
-        cloudSync = CloudSyncController(coordinator: SyncCoordinator(journal: journal, transport: LocalOnlySyncTransport()), remoteEnabled: false)
+        let store = try WorkspaceStore(url: storeURL, deviceID: "test-device")
+        self.store = store
+        await publish(try await store.save(workspace: workspace))
         preferences.calendarEnabled = false; preferences.remindersEnabled = false
         preferences.workScheduleConfigured = true; preferences.workTimeZoneID = TimeZone.current.identifier
         preferences.workWeekends = true
@@ -262,31 +182,42 @@ extension AppBackup: Codable {
         guard !loaded else { return }
         loaded = true
         do {
-            let date = Date()
-            let (storedValue, first) = try await store.load(now: date)
-            let shouldSeedQA = Self.workCalendarQAMode && (Self.resetWorkCalendarQA || first)
-            let value = shouldSeedQA ? Self.workCalendarQAWorkspace(now: date) : storedValue
-            if Self.workCalendarQAMode, shouldSeedQA { try await store.save(value) }
-            workspace = value
-            if !Self.workCalendarQAMode, !first, preferences.acceptanceNoticeAcknowledged != true,
-               value.needsAcceptanceReinterpretationNotice {
+            let date = Date(), url = storeURL, deviceID = Self.deviceID(syncDefaults)
+            let opened = try await Task.detached(priority: .userInitiated) { try WorkspaceStore(url: url, deviceID: deviceID) }.value
+            store = opened
+            var document = await opened.document
+            if Self.workCalendarQAMode, Self.resetWorkCalendarQA || opened.isNew {
+                document = try await opened.save(workspace: Self.workCalendarQAWorkspace(now: date))
+            }
+            if !Self.workCalendarQAMode, !opened.isNew, preferences.acceptanceNoticeAcknowledged != true,
+               document.workspace.needsAcceptanceReinterpretationNotice {
                 acceptanceNotice = "验收规则已更新：没有添加验收条件的节点，在必需工作完成后即视为验收通过；以前标记为“非必需”的验收条件现在按必需处理。"
             }
             if !Self.workCalendarQAMode, preferences.workTimeZoneID == nil { preferences.workTimeZoneID = TimeZone.current.identifier; preferences.save() }
-            if !Self.workCalendarQAMode, first {
+            if !Self.workCalendarQAMode, opened.isNew {
                 preferences.demoCapacityStart = nil
                 preferences.demoScenarioVersion = nil
                 preferences.workTimeZoneID = TimeZone.current.identifier
                 preferences.save()
             }
-            if Self.workCalendarQAMode { await prepareSync(accountID: nil, importLocal: true) } else { await prepareSync() }
-            // Domain and journal are ready before Calendar imports and planning refresh.
+            // Settings saved before they were part of the document start syncing from this device.
+            if document.preferences.isEmpty {
+                document = try await opened.save(preferences: preferences.syncValues(calendars: calendar.calendars))
+            }
+            await publish(document)
             loading = false
             ensureCalendarBridge()
+            startSync()
             await refresh()
         } catch { loadFailure = "无法读取本地数据：\(error.localizedDescription)" }
         loading = false
         resumeWriteWaiters()
+    }
+    private static func deviceID(_ defaults: UserDefaults) -> String {
+        if let id = defaults.string(forKey: "cubic.sync.deviceID") { return id }
+        let id = UUID().uuidString
+        defaults.set(id, forKey: "cubic.sync.deviceID")
+        return id
     }
     func retryLoad() async { loaded = false; loading = true; loadFailure = nil; await boot() }
     func item(_ id: String) -> WorkItem? { workspace.items.first { $0.id == id } }
@@ -303,7 +234,6 @@ extension AppBackup: Codable {
     func leaveMessagePage(_ id: UUID) {
         let wasCurrent = messagePages.last == id
         messagePages.removeAll { $0 == id }
-        recoveryBlockedHosts.remove(id)
         if wasCurrent { invalidateActionMessages() }
     }
     func enterModalMessageHost(_ id: UUID) {
@@ -314,7 +244,6 @@ extension AppBackup: Codable {
     func leaveModalMessageHost(_ id: UUID) {
         let wasCurrent = modalMessageHosts.last == id
         modalMessageHosts.removeAll { $0 == id }
-        recoveryBlockedHosts.remove(id)
         if wasCurrent { invalidateActionMessages() }
     }
     func isCurrentModalMessageHost(_ id: UUID) -> Bool { modalMessageHosts.last == id }
@@ -393,7 +322,7 @@ extension AppBackup: Codable {
     }
     /// UI callers await readiness here, never poll or replay their business command.
     func mutateWhenReady(_ change: @escaping (inout Workspace) throws -> Void) async -> Bool {
-        let context = messageContextVersion, session = workspaceSession?.id
+        let context = messageContextVersion
         while saving || loading {
             let waiter = UUID()
             await withTaskCancellationHandler {
@@ -404,8 +333,7 @@ extension AppBackup: Codable {
             } onCancel: {
                 Task { @MainActor [weak self] in self?.writeWaiters.removeValue(forKey: waiter)?.resume() }
             }
-            guard !Task.isCancelled, context == messageContextVersion,
-                  session == nil || session == workspaceSession?.id else { return false }
+            guard !Task.isCancelled, context == messageContextVersion else { return false }
         }
         guard !Task.isCancelled, context == messageContextVersion else { return false }
         return await mutate(change)
@@ -414,31 +342,18 @@ extension AppBackup: Codable {
         let waiters = writeWaiters; writeWaiters = [:]
         for continuation in waiters.values { continuation.resume() }
     }
-    private var writeToken: WorkspaceWriteToken? {
-        workspaceSession.map { WorkspaceWriteToken(sessionID: $0.id, heads: syncProjection?.heads ?? []) }
-    }
     func mutate(allowWhileLoading: Bool = false, background: Bool = false, _ change: (inout Workspace) throws -> Void) async -> Bool {
         let messageContext = messageContextVersion
         guard !saving, !loading || allowWhileLoading, !Task.isCancelled else { return false }
-        guard ![currentEditorHost].compactMap({ $0 }).contains(where: recoveryBlockedHosts.contains) else {
-            if !background { reportFailure("请重新打开编辑页面", message: "原保存记录已恢复，请关闭此编辑页面后核对最新内容。", context: messageContext) }
-            return false
-        }
-        guard pendingLocalSave == nil else {
-            if !background { reportFailure("保存结果待核对", message: "原记录需要恢复核对，请在设置刷新同步。请勿重复提交。", context: messageContext) }
-            return false
-        }
         saving = true
         defer { finishWrite() }
-        let token = writeToken
         do {
             var candidate = workspace
             try change(&candidate)
             guard !Task.isCancelled else { return false }
-            let outcome = try await submitWorkspace(candidate, token: token)
-            let committed = await publishLocalCommit(outcome, context: messageContext)
-            if committed { serviceIssues["默认时间未能保存"] = nil }
-            return committed
+            try await commit(candidate)
+            serviceIssues["默认时间未能保存"] = nil
+            return true
         } catch {
             let message = userMessage(for: error)
             if background { serviceIssues["默认时间未能保存"] = message }
@@ -446,76 +361,33 @@ extension AppBackup: Codable {
             return false
         }
     }
-    /// The base token is captured with the prepared workspace, before leaving MainActor.
     func mutateProjectTemplate(_ mutation: ProjectTemplateMutation) async -> String? {
         let messageContext = messageContextVersion
-        guard !saving, !loading, pendingLocalSave == nil, !Task.isCancelled,
-              ![currentEditorHost].compactMap({ $0 }).contains(where: recoveryBlockedHosts.contains) else { return nil }
+        guard !saving, !loading, !Task.isCancelled else { return nil }
         saving = true
         defer { finishWrite() }
-        let snapshot = workspace, sourceVersion = revision, timestamp = Date(), token = writeToken
+        let snapshot = workspace, sourceVersion = revision, timestamp = Date()
         do {
             let prepared = try await Task.detached(priority: .userInitiated) {
                 try mutation.prepare(in: snapshot, now: timestamp)
             }.value
             guard !Task.isCancelled else { return nil }
             guard revision == sourceVersion else { throw CoreError.blocked("项目内容已变化，请重新查看预览后保存。") }
-            let outcome = try await submitWorkspace(prepared.workspace, token: token)
-            return await publishLocalCommit(outcome, context: messageContext) ? prepared.id : nil
+            try await commit(prepared.workspace)
+            return prepared.id
         } catch {
             reportFailure("修改未保存", message: userMessage(for: error), context: messageContext)
             return nil
         }
     }
-    private func submitWorkspace(_ value: Workspace, token: WorkspaceWriteToken?) async throws -> WorkspaceCommitOutcome {
-        guard let workspaceSession, let token else { throw CoreError.invalid("本机保存服务尚未准备好。草稿仍保留，请重新打开 app。") }
-        return try await workspaceSession.submit(value, basedOn: token)
-    }
-    @discardableResult private func publishLocalCommit(_ outcome: WorkspaceCommitOutcome, context: Int) async -> Bool {
-        switch outcome {
-        case .committed(let projection, let cacheIssue):
-            pendingLocalSave = nil
-            serviceIssues["保存结果待核对"] = nil
-            serviceIssues["本机页面数据未能更新"] = cacheIssue
-            let canonical = await cloudSync?.acceptLocalCommit(projection) ?? projection
-            await publishCanonicalProjection(canonical, cacheAlreadySaved: canonical.heads == projection.heads)
-            if !projection.planningIsValid {
-                reportStatus("修改已记录，还有同步冲突需要处理。请到设置核对。", context: context)
-            }
-            return true
-        case .recoveryRequired(let failure):
-            recoveryBlockedHosts.formUnion([currentEditorHost].compactMap { $0 })
-            pendingLocalSave = failure
-            serviceIssues["保存结果待核对"] = failure.localizedDescription
-            reportFailure("保存结果待核对", message: "请在设置刷新同步以恢复原记录。不要重复提交；草稿和原记录保留。", context: context)
-            return false
-        }
-    }
-    private func recoverPendingLocalSave() async {
-        guard !saving, let failure = pendingLocalSave, let workspaceSession else { return }
-        saving = true
-        defer { finishWrite() }
-        do {
-            if let outcome = try await workspaceSession.recover(failure.receipt) {
-                _ = await publishLocalCommit(outcome, context: messageContextVersion)
-                if pendingLocalSave == nil {
-                    // Retained editors must reopen: the original operation is complete, not a new save opportunity.
-                    invalidateActionMessages()
-                    reportStatus("原保存记录已恢复。请重新打开编辑页面，核对最新内容后再修改。", context: messageContextVersion)
-                }
-            } else {
-                pendingLocalSave = nil; serviceIssues["保存结果待核对"] = nil
-                recoveryBlockedHosts = []
-                reportStatus("已核实原修改未写入，可以重新保存。", context: messageContextVersion)
-            }
-        } catch { serviceIssues["保存结果待核对"] = error.localizedDescription }
-    }
-    private func retainLocalRecovery(_ error: Error) -> Bool {
-        guard let failure = error as? SyncLocalCommitFailure else { return false }
-        pendingLocalSave = failure
-        recoveryBlockedHosts.formUnion([currentEditorHost].compactMap { $0 })
-        serviceIssues["保存结果待核对"] = failure.localizedDescription
-        return true
+    /// Saves locally, publishes the result and schedules a folder sync. Callers hold `saving`.
+    private func commit(_ value: Workspace) async throws {
+        guard let store else { throw CoreError.invalid("本机保存服务尚未准备好。草稿仍保留，请重新打开 app。") }
+        var value = value
+        try value.applyDefaultRemainingEstimates(now: Date())
+        let document = try await store.save(workspace: value, basedOn: documentVersion)
+        await publish(document)
+        scheduleSync()
     }
     private func userMessage(for error: Error) -> String {
         if case CoreError.cycle(let path) = error {
@@ -531,21 +403,9 @@ extension AppBackup: Codable {
         }
         return error.localizedDescription
     }
-    private func persistDurableProjection(_ value: Workspace) async {
-        do { try await store.save(value); serviceIssues["本机页面数据未能更新"] = nil }
-        catch { serviceIssues["本机页面数据未能更新"] = "修改已保存，当前页面暂未更新。请重新打开 app。" }
-    }
     private func finishWrite() {
         saving = false
         resumeWriteWaiters()
-        if let deferred = deferredSyncProjection {
-            deferredSyncProjection = nil
-            let generation = syncControllerGeneration
-            Task {
-                guard syncControllerGeneration == generation else { return }
-                await applySyncProjection(deferred)
-            }
-        }
     }
     func refresh(background: Bool = true) async {
         #if DEBUG
@@ -567,8 +427,7 @@ extension AppBackup: Codable {
         }
         await calendarBridge?.refresh()
         updateCalendarIntegrationSnapshot()
-        guard syncProjection?.planningIsValid != false else { calculationIsStale = true; return }
-        if !saving, syncJournal != nil, !workspace.defaultEstimateItemIDs.isEmpty {
+        if !saving, store != nil, !workspace.defaultEstimateItemIDs.isEmpty {
             if await mutate(allowWhileLoading: true, background: true, { _ in }) {
                 serviceIssues["默认时间未能保存"] = nil
                 return
@@ -584,13 +443,13 @@ extension AppBackup: Codable {
         let requestContext = planningContextRevision
         let date = now
         let input = await planningInput(date: date)
-        guard generation == refreshGeneration, revision == requestRevision, planningContextRevision == requestContext, canVerifyPlanning else { return }
+        guard generation == refreshGeneration, revision == requestRevision, planningContextRevision == requestContext else { return }
         visibleCapacitySlots = input.input.slots
         do {
             let result = try await Task.detached(priority: .userInitiated) {
                 try Engine.plan(workspace: input.workspace, input: input.input)
             }.value
-            guard revision == requestRevision, generation == refreshGeneration, planningContextRevision == requestContext, canVerifyPlanning else { return }
+            guard revision == requestRevision, generation == refreshGeneration, planningContextRevision == requestContext else { return }
             planning = result
             snapshot = result.legacy
             calculationUpdatedAt = date
@@ -599,7 +458,7 @@ extension AppBackup: Codable {
             await updateNotices(using: result)
             await scheduleReminders()
         } catch {
-            guard revision == requestRevision, generation == refreshGeneration, planningContextRevision == requestContext, canVerifyPlanning else { return }
+            guard revision == requestRevision, generation == refreshGeneration, planningContextRevision == requestContext else { return }
             calculationIsStale = true
             let message = "\(error.localizedDescription) 请检查相关设置后下拉刷新。已有工作记录保留。"
             serviceIssues["排期未能更新"] = message
@@ -608,7 +467,6 @@ extension AppBackup: Codable {
     }
     func trial(itemID: String, minutes: Int) async -> TrialResult? {
         let messageContext = messageContextVersion
-        guard canVerifyPlanning else { return nil }
         let version = sourceVersion
         let date = Date()
         let input = await calculationInput(date: date)
@@ -616,11 +474,11 @@ extension AppBackup: Codable {
             var result = try await Task.detached(priority: .userInitiated) {
                 try Engine.trial(workspace: input.workspace, selections: [TrialSelection(itemID: itemID, minutes: minutes)], slots: input.slots, now: date)
             }.value
-            guard canVerifyPlanning, sourceVersion == version else { return nil }
+            guard sourceVersion == version else { return nil }
             markMissingCalendar(&result.snapshot)
             return result
         } catch {
-            guard canVerifyPlanning, sourceVersion == version else { return nil }
+            guard sourceVersion == version else { return nil }
             reportFailure("试算未完成", message: "\(error.localizedDescription) 请调整试算内容后重试。", context: messageContext)
             return nil
         }
@@ -651,7 +509,7 @@ extension AppBackup: Codable {
         if result.feasibility == .feasible { result.feasibility = .undetermined }
         for i in result.projects.indices where result.projects[i].feasibility == .feasible { result.projects[i].feasibility = .undetermined }
     }
-    func savePreferences(_ value: UserPreferences, comparedTo original: [String: SyncValue]? = nil) async -> Bool {
+    func savePreferences(_ value: UserPreferences) async -> Bool {
         let messageContext = messageContextVersion
         guard !saving, !loading else { reportStatus("正在保存，请稍后再保存设置。", context: messageContext); return false }
         saving = true
@@ -662,25 +520,17 @@ extension AppBackup: Codable {
             candidate.workScheduleConfigured = true
             candidate.workTimeZoneID = value.workTimeZoneID ?? TimeZone.current.identifier
             candidate.demoCapacityStart = nil
-            let fields = try candidate.syncValues(calendars: calendar.calendars)
-            // A remote update while the sheet is open must not be overwritten by untouched draft fields.
-            let existing = Set(syncProjection?.preferences.keys.map { $0 } ?? []).union((syncProjection?.conflicts ?? []).flatMap(\.paths).filter { $0.collection == "@preferences" }.map(\.field))
-            let patch = fields.filter { original?[$0.key] != $0.value || !existing.contains($0.key) }
-            if let original, patch.contains(where: { field, edited in
-                guard let current = syncProjection?.preferences[field] else { return false }
-                return current != original[field] && current != edited
-            }) { throw CoreError.invalid("这项设置刚被另一台设备更新。请重新打开设置，核对最新内容后再保存。") }
-            guard let cloudSync else { throw CoreError.invalid("本机保存服务尚未准备好，请稍后再保存设置。") }
-            let result = try await cloudSync.recordPreferences(patch)
-            await publishCanonicalProjection(result)
-            syncDefaults.set(true, forKey: "cubic.preferences.saved")
+            guard let store else { throw CoreError.invalid("本机保存服务尚未准备好，请稍后再保存设置。") }
+            let document = try await store.save(preferences: candidate.syncValues(calendars: calendar.calendars))
+            preferences = candidate
+            preferences.save(defaults: syncDefaults)
+            await publish(document)
+            scheduleSync()
             revision += 1
-            // Preference changes must cancel suppressed pending requests even when
-            // structural conflicts prevent a new precise planning snapshot.
             await scheduleReminders()
             await refresh()
             return true
-        } catch { let partial = retainLocalRecovery(error); reportFailure(partial ? "设置保存结果待核对" : "设置未保存", message: error.localizedDescription, context: messageContext); return false }
+        } catch { reportFailure("设置未保存", message: error.localizedDescription, context: messageContext); return false }
     }
     func enableCalendar() async {
         let messageContext = messageContextVersion
@@ -699,8 +549,7 @@ extension AppBackup: Codable {
     }
     private func updateNotices(using planning: PlanningSnapshot) async {
         let value = workspace, date = Date(), expectedRevision = revision
-        let conflicts = syncProjection?.conflicts ?? []
-        let changes = await Task.detached { RiskNoticeEngine.changes(workspace: value, planning: planning, now: date, conflicts: conflicts) }.value
+        let changes = await Task.detached { RiskNoticeEngine.changes(workspace: value, planning: planning, now: date) }.value
         guard expectedRevision == revision else { return }
         if !changes.isEmpty && !saving {
             saving = true
@@ -708,9 +557,7 @@ extension AppBackup: Codable {
             do {
                 var candidate = workspace
                 for notice in changes { candidate.history.append(try RiskNoticeEngine.event(notice, at: date)) }
-                try candidate.validate()
-                let committed = try await journalLocalWorkspace(candidate)
-                workspace = committed
+                try await commit(candidate)
                 serviceIssues["提醒记录未能更新"] = nil
             } catch { serviceIssues["提醒记录未能更新"] = "\(error.localizedDescription) 下次刷新会重试。" }
         }
@@ -728,8 +575,7 @@ extension AppBackup: Codable {
     }
     private func saveNotice(_ notice: RiskNotice) async {
         _ = await mutate { $0.history.append(try RiskNoticeEngine.event(notice, at: notice.changedAt)) }
-        // A persisted acknowledgement must cancel its alert even if planning
-        // fails or the sync journal cannot produce a valid computation view.
+        // A persisted acknowledgement must cancel its alert even if planning fails.
         await refreshStoredNotices()
         await scheduleReminders()
     }
@@ -739,7 +585,7 @@ extension AppBackup: Codable {
         #endif
         noticeRefreshGeneration += 1
         let generation = noticeRefreshGeneration
-        let current = syncProjection?.workspace ?? workspace
+        let current = workspace
         let stored = await Task.detached { RiskNoticeEngine.stored(in: current) }.value
         guard generation == noticeRefreshGeneration else { return }
         notices = stored
@@ -758,23 +604,19 @@ extension AppBackup: Codable {
     func planningTrial(itemID: String, minutes: Int?, start: Date? = nil, counterfactual: Bool = false, reportErrors: Bool = true) async -> PlanningTrialResult? {
         let messageContext = messageContextVersion
         let version = sourceVersion
-        guard syncProjection?.planningIsValid != false else {
-            if reportErrors { reportFailure("试算未完成", message: "还有同步冲突未处理，暂时无法试算。请到设置处理同步冲突。", context: messageContext) }
-            return nil
-        }
         let input = await planningInput(date: Date())
         do {
             let result = try await Task.detached(priority: .userInitiated) {
                 try Engine.trial(workspace: input.workspace,
                                  request: PlanningTrialRequest(itemID: itemID, minutes: minutes, start: start, counterfactual: counterfactual), input: input.input)
             }.value
-            guard canVerifyPlanning, result.source.input.revision.workspace == String(revision), result.source.input.revision.capacity == sourceVersion else {
+            guard result.source.input.revision.workspace == String(revision), result.source.input.revision.capacity == sourceVersion else {
                 if reportErrors { reportFailure("请重新查看试算", message: "数据在计算期间发生变化，请查看刷新后的试算再确认。", context: messageContext) }
                 return nil
             }
             return result
         } catch {
-            guard canVerifyPlanning, sourceVersion == version else { return nil }
+            guard sourceVersion == version else { return nil }
             if reportErrors { reportFailure("试算未完成", message: error.localizedDescription, context: messageContext) }
             return nil
         }
@@ -788,7 +630,7 @@ extension AppBackup: Codable {
             try workspace.chooseNextAction(itemID: itemID, now: now, displayedItemIDs: ids, dataVersion: version, note: note)
             if let choiceID = workspace.currentNextAction?.id {
                 workspace.history.append(HistoryEvent(date: now, kind: .choiceRecorded, objectID: choiceID,
-                                                      note: "当时查看的可选工作", detail: String(decoding: try SyncCoding.encode(context), as: UTF8.self)))
+                                                      note: "当时查看的可选工作", detail: String(decoding: try JSONCoding.encode(context), as: UTF8.self)))
             }
         }
     }
@@ -802,20 +644,12 @@ extension AppBackup: Codable {
         },
         sourceIsCurrent: { [weak self] result in
             guard let self else { return false }
-            return self.canVerifyPlanning && result.source.input.revision.workspace == String(self.revision) &&
+            return result.source.input.revision.workspace == String(self.revision) &&
                 result.source.input.revision.capacity == self.sourceVersion
         },
         commit: { [weak self] result, note in
             guard let self else { throw CancellationError() }
-            return try await self.commitPlanningChoice(result, note: note)
-        },
-        recover: { [weak self] receipt in
-            guard let self, let session = self.workspaceSession, !self.saving else { throw CoreError.blocked("正在保存，请稍后核对。") }
-            self.saving = true
-            defer { self.finishWrite() }
-            let outcome = try await session.recover(receipt)
-            if let outcome { _ = await self.publishLocalCommit(outcome, context: self.messageContextVersion) }
-            return outcome
+            try await self.commitPlanningChoice(result, note: note)
         })
         storedChoiceConfirmation = operation
         return operation
@@ -823,18 +657,15 @@ extension AppBackup: Codable {
 
     func confirmDisplayedTrial(presentationID: UUID, displayed: PlanningTrialResult, request: PlanningTrialRequest,
                               note: String, isCurrent: @escaping @MainActor () -> Bool) async -> PlanningChoiceConfirmation.Outcome {
-        let context = messageContextVersion, sessionID = workspaceSession?.id, generation = syncControllerGeneration
+        let context = messageContextVersion
         let outcome = await choiceConfirmation.confirm(presentationID: presentationID, displayed: displayed,
-                                                       request: request, note: note, isCurrent: { [weak self] in
-                                                           guard let self else { return false }
-                                                           return self.workspaceSession?.id == sessionID && self.syncControllerGeneration == generation && isCurrent()
-                                                       })
+                                                       request: request, note: note, isCurrent: isCurrent)
         if case .unavailable(let message?) = outcome, isCurrent() {
             reportFailure("确认未完成", message: message, context: context)
         }
         return outcome
     }
-    private func commitPlanningChoice(_ result: PlanningTrialResult, note: String) async throws -> WorkspaceCommitOutcome {
+    private func commitPlanningChoice(_ result: PlanningTrialResult, note: String) async throws {
         let scenario = result.scenario ?? result.baseline
         let savedTrial = result.request.minutes.map { minutes in
             TrialResult(selections: [TrialSelection(itemID: result.request.itemID, minutes: minutes)], allocations: result.allocations,
@@ -842,21 +673,16 @@ extension AppBackup: Codable {
         }
         let ids = Array(Set([result.request.itemID] + result.impacts.flatMap(\.itemIDs))).sorted()
         let version = sourceVersion
-        guard canVerifyPlanning, result.source.input.revision.workspace == String(revision), result.source.input.revision.capacity == sourceVersion else {
+        guard result.source.input.revision.workspace == String(revision), result.source.input.revision.capacity == sourceVersion else {
             throw CoreError.blocked("源数据刚刚发生变化，请查看刷新后的影响再确认。")
         }
-        guard !saving, !loading, pendingLocalSave == nil, !Task.isCancelled else {
-            throw CoreError.blocked("正在保存或核对原保存记录，请稍后重试。")
-        }
+        guard !saving, !loading, !Task.isCancelled else { throw CoreError.blocked("正在保存，请稍后重试。") }
         saving = true
         defer { finishWrite() }
-        let token = writeToken
         var candidate = workspace
         try recordChoice(&candidate)
         guard !Task.isCancelled else { throw CancellationError() }
-        let outcome = try await submitWorkspace(candidate, token: token)
-        _ = await publishLocalCommit(outcome, context: messageContextVersion)
-        return outcome
+        try await commit(candidate)
 
         func recordChoice(_ workspace: inout Workspace) throws {
             let now = Date()
@@ -864,7 +690,7 @@ extension AppBackup: Codable {
                                            displayedItemIDs: ids, dataVersion: version, impactWasVerified: savedTrial != nil, note: note)
             if let id = workspace.currentNextAction?.id {
                 workspace.history.append(HistoryEvent(date: now, kind: .choiceRecorded, objectID: id,
-                                                      note: "当时的试算条件与结果", detail: String(decoding: try SyncCoding.encode(result), as: UTF8.self)))
+                                                      note: "当时的试算条件与结果", detail: String(decoding: try JSONCoding.encode(result), as: UTF8.self)))
             }
         }
     }
@@ -875,15 +701,13 @@ extension AppBackup: Codable {
         let issues = capacityIssues()
         let version = sourceVersion
         let workspaceRevision = String(revision)
-        let disputed = Array(syncProjection?.pausedItemIDs ?? [])
         let value = await Task.detached(priority: .userInitiated) { [original, settings, calendarValue, date] in
             Self.buildCalculationInput(workspace: original, preferences: settings, calendar: calendarValue, date: date)
         }.value
         let input = PlanningInput(slots: value.slots, now: date, horizonEnd: Self.planningHorizon(workspace: original, date: date),
                                   revision: PlanningRevision(workspace: workspaceRevision, capacity: version,
                                                              calendar: calendarValue.fetchedAt.map { String($0.timeIntervalSince1970) } ?? "unavailable", time: version),
-                                  options: PlanningOptions(capacityVerified: issues.isEmpty, capacityNote: issues.isEmpty ? nil : issues.joined(separator: " "),
-                                                           disputedItemIDs: disputed))
+                                  options: PlanningOptions(capacityVerified: issues.isEmpty, capacityNote: issues.isEmpty ? nil : issues.joined(separator: " ")))
         return (value.workspace, input)
     }
     func saveTimeBlock(_ block: WorkTimeBlock) async -> Bool {
@@ -897,27 +721,24 @@ extension AppBackup: Codable {
         return await mutate { try $0.setTimeBlock(block, slots: value.input.slots, busy: value.input.busy, now: Date()) }
     }
     func ensureCalendarBridge(eventStore: (any CalendarBridgeIO)? = nil) {
-        let partition = activeSyncPartition ?? "local"
-        guard calendarBridge == nil || calendarBridgePartition != partition else { return }
-        calendarBridge?.invalidate()
+        guard calendarBridge == nil else { return }
         calendarBridgeGeneration += 1
         let generation = calendarBridgeGeneration
-        calendarBridgePartition = partition
-        calendarBridge = CalendarBridge(workspaceID: Self.syncWorkspaceID + "." + partition, defaults: syncDefaults,
+        calendarBridge = CalendarBridge(workspaceID: Self.calendarBridgeID, defaults: syncDefaults,
             context: { [weak self] in
-                guard let self, self.calendarBridgeGeneration == generation, (self.activeSyncPartition ?? "local") == partition else { return CalendarBridgeContext(workspace: .empty, slots: [], externalBusy: [], capacityVerified: false) }
+                guard let self, self.calendarBridgeGeneration == generation else { return CalendarBridgeContext(workspace: .empty, slots: [], externalBusy: [], capacityVerified: false) }
                 return await self.calendarIntegrationContext()
             }, applyExternal: { [weak self] block, expected, eventID in
-                guard let self, self.calendarBridgeGeneration == generation, (self.activeSyncPartition ?? "local") == partition else { throw CoreError.invalid("同步数据已切换，请在当前数据中重新核对日历。") }
+                guard let self, self.calendarBridgeGeneration == generation else { throw CoreError.invalid("日历连接已重置，请重新核对。") }
                 try await self.applyCalendarTimeBlock(block, expected: expected, excludingEventID: eventID)
             }, removeBlock: { [weak self] id in
-                guard let self, self.calendarBridgeGeneration == generation, (self.activeSyncPartition ?? "local") == partition else { throw CoreError.invalid("同步数据已切换，请在当前数据中重新核对日历。") }
+                guard let self, self.calendarBridgeGeneration == generation else { throw CoreError.invalid("日历连接已重置，请重新核对。") }
                 guard !self.saving, !self.loading else { throw CoreError.invalid("正在保存，请稍后重试。") }
                 guard await self.mutate({ try $0.removeTimeBlock(id: id, now: Date()) }) else {
                     throw CoreError.invalid(self.errorMessage ?? "时间块未能保存，请重试。")
                 }
             }, isContextCurrent: { [weak self] sourceRevision in
-                guard let self, self.calendarBridgeGeneration == generation, (self.activeSyncPartition ?? "local") == partition else { return false }
+                guard let self, self.calendarBridgeGeneration == generation else { return false }
                 return self.calendarIntegrationSourceVersion == sourceRevision
             }, eventStore: eventStore ?? CalendarBridgeStore())
         #if DEBUG
@@ -934,19 +755,18 @@ extension AppBackup: Codable {
             Self.buildCalculationInput(workspace: original, preferences: settings, calendar: external, date: Date()).slots
         }.value
         return CalendarBridgeContext(workspace: original, slots: slots, externalBusy: [],
-            disputedItemIDs: syncProjection?.pausedItemIDs ?? [],
-            capacityVerified: version == calendarIntegrationSourceVersion && generation == calendarBridgeGeneration && calendarStorageReady && canVerifyPlanning && (settings.hasDeclaredWorkSchedule || settings.demoCapacityStart != nil) &&
+            capacityVerified: version == calendarIntegrationSourceVersion && generation == calendarBridgeGeneration && calendarStorageReady && (settings.hasDeclaredWorkSchedule || settings.demoCapacityStart != nil) &&
                 (!settings.calendarEnabled || (external.authorized && external.missingCalendarIDs.isEmpty && external.fetchedAt.map { Date().timeIntervalSince($0) < 300 } == true)),
             storageReady: calendarStorageReady, sourceRevision: version)
     }
     private func applyCalendarTimeBlock(_ block: WorkTimeBlock, expected: WorkTimeBlock?, excludingEventID: String?) async throws {
         guard !saving, !loading else { throw CoreError.invalid("正在保存，请稍后重试。") }
-        let generation = calendarBridgeGeneration, partition = activeSyncPartition
+        let generation = calendarBridgeGeneration
         let current = workspace.timeBlocks?.first { $0.id == block.id }
         if current == block { return } // The same fact may already have arrived through data sync.
         guard current == expected else { throw CoreError.invalid("Cubic 时间块也已修改，请刷新后确认双方时间。") }
         let context = await calendarIntegrationContext()
-        guard !saving, generation == calendarBridgeGeneration, partition == activeSyncPartition, (workspace.timeBlocks?.first { $0.id == block.id }) == expected else {
+        guard !saving, generation == calendarBridgeGeneration, (workspace.timeBlocks?.first { $0.id == block.id }) == expected else {
             throw CoreError.invalid("工作刚刚更新，请重新核对后再接受。")
         }
         guard context.capacityVerified else { throw CoreError.invalid("日历容量尚未核实，请先检查工作时段和日历权限。") }
@@ -956,9 +776,7 @@ extension AppBackup: Codable {
         try candidate.setTimeBlock(block, slots: context.slots, busy: context.externalBusy + otherBusy, now: Date())
         saving = true
         defer { finishWrite() }
-        let committed = try await journalLocalWorkspace(candidate)
-        workspace = committed; revision += 1; calculationIsStale = true
-        Task { await refresh() }
+        try await commit(candidate)
     }
     private func updateCalendarIntegrationSnapshot() {
         var value = externalCalendarSnapshot
@@ -980,244 +798,102 @@ extension AppBackup: Codable {
         markMissingCalendar(&result)
         return result.risks.map(\.message)
     }
-    @discardableResult func prepareSync(accountID: String? = nil, importLocal: Bool = true, fileConnection: FileSyncConnection? = nil, transportKind: String? = nil) async -> Bool {
-        guard pendingLocalSave == nil else { statusMessage = "请先恢复原保存记录，再切换数据。"; return false }
-        guard !saving else { statusMessage = "正在保存，请稍后再切换账号数据。"; return false }
-        saving = true
-        defer { finishWrite() }
-        let previousController = cloudSync, previousJournal = syncJournal
-        let previousPartition = activeSyncPartition, previousProjection = syncProjection
-        let previousSession = workspaceSession, previousPendingSave = pendingLocalSave
-        let previousKind = activeSyncKind, previousGeneration = syncControllerGeneration
+    /// Applies a saved or downloaded document to the published state.
+    private func publish(_ document: WorkspaceDocument) async {
+        documentVersion = document.version
+        let historyChanged = workspace.history != document.workspace.history
+        var preferencesChanged = false
         do {
-            let defaults = syncDefaults
-            let deviceID = defaults.string(forKey: "cubic.sync.deviceID") ?? UUID().uuidString
-            defaults.set(deviceID, forKey: "cubic.sync.deviceID")
-            let kind = transportKind ?? (defaults.string(forKey: "cubic.sync.transport") == "file" ? "file" : "local")
-            let connection = fileConnection ?? self.fileSyncConnection
-            let account = kind == "file" ? connection?.metadata.remoteBinding.rawValue : accountID
-            let remoteEnabled = kind == "file"
-            if kind == "file", connection == nil { throw CoreError.invalid("同步目录授权不可用，请重新选择目录。") }
-            let partition = account.map { SHA256.hash(data: Data($0.utf8)).map { String(format: "%02x", $0) }.joined() } ?? "local"
-            if activeSyncPartition == partition, activeSyncKind == kind, fileConnection == nil, let cloudSync, let syncJournal {
-                await publishCanonicalProjection(try await syncJournal.snapshot())
-                syncStorageError = nil
-                cloudSync.start()
-                return true
-            }
-            // Explicit association carries raw branches, not the isolated planning preview.
-            let reusesJournal = activeSyncPartition == partition && syncJournal != nil
-            let associationArchive = importLocal && !reusesJournal ? try await cloudSync?.exportArchive() : nil
-            // Keep the source handles until the target is ready, including failed retries.
-            await cloudSync?.retire()
-            let root = URL.documentsDirectory.appendingPathComponent(Self.workCalendarQAMode ? "CubicQA/Sync" : "Cubic/Sync")
-            #if DEBUG
-            let directory = (testingSyncRoot ?? root).appendingPathComponent(partition)
-            #else
-            let directory = root.appendingPathComponent(partition)
-            #endif
-            let workspaceID = Self.syncWorkspaceID
-            let journal: SyncJournal
-            if reusesJournal, let existing = syncJournal {
-                // Disconnecting or renewing a folder grant changes the transport,
-                // not the local history. A second writer for this same directory
-                // would fail its lease while the rollback controller owns it.
-                journal = existing
-            } else {
-                journal = try await Task.detached(priority: .userInitiated) {
-                    try SyncJournal(directory: directory, workspaceID: workspaceID, deviceID: deviceID)
-                }.value
-            }
-            if let account { try await journal.bindAccount(account) }
-            if let associationArchive {
-                _ = try await journal.restoreArchive(associationArchive)
-            } else if importLocal, !reusesJournal, workspace != .empty {
-                // No domain facts exist on a fresh install. The first real edit
-                // will create its revision; do not queue an empty bootstrap.
-                _ = try await journal.bootstrap(workspace: workspace, currentChoiceID: workspace.currentChoiceID)
-            }
-            let adapter: any SyncTransport
-            if kind == "file", let connection {
-                adapter = FileProviderSyncTransport(access: SecurityScopedFileSyncAccess(connection: connection), workspaceID: Self.syncWorkspaceID, remoteBindingID: connection.metadata.remoteBinding, pageSize: 256)
-            } else { adapter = LocalOnlySyncTransport() }
-            let coordinator = SyncCoordinator(journal: journal, transport: adapter)
-            // Migrate existing user settings once. Pull first so an existing remote setting wins over a local cache.
-            if importLocal, preferences.hasDeclaredWorkSchedule || preferences.calendarEnabled || preferences.remindersEnabled || preferences.workWeekends || syncDefaults.bool(forKey: "cubic.preferences.saved") {
-                func registeredPreferences(_ value: SyncMergeResult) -> Set<String> {
-                    Set(value.preferences.keys).union(value.conflicts.flatMap(\.paths).filter { $0.collection == "@preferences" }.map(\.field))
-                }
-                let registered = registeredPreferences(try await journal.snapshot())
-                let fields = try preferences.syncValues(calendars: calendar.calendars)
-                if !Set(fields.keys).isSubset(of: registered) {
-                    if remoteEnabled { _ = await coordinator.refresh() }
-                    let existing = registeredPreferences(try await journal.snapshot())
-                    let calendars = await calendarReader.read(from: Date(), to: Date(), selectedIDs: [])
-                    let legacy = try preferences.syncValues(calendars: calendars.calendars).filter { !existing.contains($0.key) }
-                    _ = try await coordinator.recordPreferences(legacy)
-                }
-            }
-            let generation = syncControllerGeneration + 1
-            let controller = CloudSyncController(coordinator: coordinator, remoteEnabled: remoteEnabled, onMerge: { [weak self] value in
-                Task { @MainActor [weak self] in
-                    guard let self, (self.activeSyncPartition ?? "local") == partition, self.syncControllerGeneration == generation else { return }
-                    await self.applySyncProjection(value)
-                }
-            })
-            workspaceSession = WorkspaceSession(journal: journal, cacheProjection: { [store] value in try await store.save(value) })
-            pendingLocalSave = nil
-            syncJournal = journal
-            cloudSync = controller
-            syncControllerGeneration = generation
-            if calendarBridgePartition != partition {
-                calendarBridge?.invalidate(); calendarBridge = nil; calendarBridgePartition = nil
-            }
-            activeSyncPartition = partition
-            activeSyncKind = kind
-            deferredSyncProjection = nil
-            // An empty or blocker-only canonical workspace is still authoritative.
-            let projection = try await journal.snapshot()
-            if previousPartition != partition && !importLocal { preferences = UserPreferences() }
-            await publishCanonicalProjection(projection)
-            ensureCalendarBridge()
-            syncStorageError = nil
-            serviceIssues["本机记录未能打开"] = nil
-            serviceIssues["账号数据未能切换"] = nil
-            #if DEBUG
-            if !isIntegrationTest, !Self.workCalendarQAMode || kind == "file" { controller.start() }
-            #else
-            controller.start()
-            #endif
-            return true
-        } catch {
-            await cloudSync?.retire()
-            cloudSync = previousController; syncJournal = previousJournal
-            workspaceSession = previousSession; pendingLocalSave = previousPendingSave
-            activeSyncPartition = previousPartition; syncProjection = previousProjection; activeSyncKind = previousKind
-            syncControllerGeneration = previousGeneration
-            ensureCalendarBridge()
-            deferredSyncProjection = nil
-            if let previousController {
-                previousController.resumeAfterFailedSwitch()
-                syncStorageError = nil
-                serviceIssues["账号数据未能切换"] = "原数据仍可使用。\(error.localizedDescription) 请在设置重新选择账号数据。"
-            } else {
-                syncStorageError = "本机保存服务未能打开，暂时无法保存修改。请重新打开 app 后重试；若仍失败，请到设置导出备份并联系支持。现有记录保留。"
-                serviceIssues["本机记录未能打开"] = syncStorageError!
-            }
-            return false
-        }
-    }
-    private func journalLocalWorkspace(_ value: Workspace, expectedHeads: [String]? = nil) async throws -> Workspace {
-        guard let session = workspaceSession else { throw CoreError.invalid("本机保存服务尚未准备好。") }
-        let token = WorkspaceWriteToken(sessionID: session.id, heads: expectedHeads ?? syncProjection?.heads ?? [])
-        let outcome = try await session.submit(value, basedOn: token)
-        switch outcome {
-        case .committed(let result, let cacheIssue):
-            serviceIssues["本机页面数据未能更新"] = cacheIssue
-            let canonical = await cloudSync?.acceptLocalCommit(result) ?? result
-            await publishCanonicalProjection(canonical, cacheAlreadySaved: canonical.heads == result.heads)
-            guard canonical.planningIsValid else { throw WorkspaceCommittedProjectionUnavailable() }
-            return canonical.planningWorkspace
-        case .recoveryRequired(let failure):
-            recoveryBlockedHosts.formUnion([currentEditorHost].compactMap { $0 })
-            pendingLocalSave = failure
-            serviceIssues["保存结果待核对"] = failure.localizedDescription
-            throw failure
-        }
-    }
-    private func applySyncProjection(_ value: SyncMergeResult) async {
-        guard cloudSync?.projection?.heads == value.heads || cloudSync?.projection == nil else { return }
-        if saving { deferredSyncProjection = value; return }
-        saving = true
-        defer { finishWrite() }
-        await publishCanonicalProjection(value)
-    }
-    func publishCanonicalProjection(_ value: SyncMergeResult, cacheAlreadySaved: Bool = false) async {
-        let noticeHistoryChanged = syncProjection?.workspace.history != value.workspace.history
-        var reminderPreferencesChanged = false
-        let contextChanged = syncProjection?.heads != value.heads || syncProjection?.pausedItemIDs != value.pausedItemIDs || syncProjection?.planningIsValid != value.planningIsValid
-        if contextChanged { planningContextRevision += 1 }
-        syncProjection = value
-        do {
-            let updated = try preferences.applyingSyncValues(value.preferences, calendars: calendar.calendars)
-            if preferences != updated {
-                reminderPreferencesChanged = true
+            let updated = try preferences.applyingSyncValues(document.preferences, calendars: calendar.calendars)
+            if updated != preferences {
                 preferences = updated
                 preferences.save(defaults: syncDefaults)
-                revision += 1; calculationIsStale = true
-                Task { await refresh() }
+                preferencesChanged = true
             }
             serviceIssues["同步设置需要检查"] = nil
-        } catch { serviceIssues["同步设置需要检查"] = "收到的设置无法使用，请到设置检查同步冲突。\(error.localizedDescription)" }
-        // Notification state lives in factual history and does not require a
-        // successful planning projection, including remote read/snooze edits.
-        if noticeHistoryChanged || reminderPreferencesChanged {
+        } catch { serviceIssues["同步设置需要检查"] = "收到的设置无法使用，请到设置检查后重新保存。\(error.localizedDescription)" }
+        guard workspace != document.workspace || preferencesChanged else { return }
+        workspace = document.workspace
+        revision += 1
+        calculationIsStale = true
+        if historyChanged || preferencesChanged {
             await refreshStoredNotices()
             await scheduleReminders()
         }
-        guard syncProjection?.heads == value.heads else { return }
-        guard value.planningIsValid else {
-            calculationIsStale = true
-            isRefreshing = false
-            planning = nil
-            // SyncSettingsSection presents the conflict persistently; a remote merge must not interrupt navigation.
-            return
-        }
-        let projected = value.planningWorkspace
-        guard workspace != projected || contextChanged else { return }
-        if workspace != projected {
-            if !cacheAlreadySaved { await persistDurableProjection(projected) }
-            workspace = projected
-        }
-        revision += 1
-        calculationIsStale = true
         Task { await refresh() }
     }
-    func refreshSync() async { await recoverPendingLocalSave(); await cloudSync?.refresh() }
-    func inspectFileSyncDirectory(_ url: URL) async -> FileSyncDirectoryInspection? {
-        do {
-            return try await Task.detached(priority: .userInitiated) {
-                try FileSyncDirectoryManager.inspect(directory: url, workspaceID: Self.syncWorkspaceID)
-            }.value
-        } catch { reportFailure("同步目录未能读取", message: error.localizedDescription); return nil }
-    }
-    func connectFileSyncDirectory(_ inspection: FileSyncDirectoryInspection, importLocal: Bool) async {
-        do {
-            let connection: FileSyncConnection
-            if let existing = inspection.connection { connection = existing }
-            else {
-                connection = try await Task.detached(priority: .userInitiated) {
-                    try FileSyncDirectoryManager.create(directory: inspection.directory, workspaceID: Self.syncWorkspaceID)
-                }.value
+    /// Polls the sync folder while the app is active.
+    func startSync() {
+        syncLoop?.cancel()
+        guard fileSyncConnection != nil else { syncState = SyncState(); return }
+        #if DEBUG
+        if isIntegrationTest { return }
+        #endif
+        syncLoop = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.refreshSync()
+                try? await Task.sleep(for: .seconds(30))
             }
-            let encoded = try JSONEncoder().encode(connection)
-            guard await prepareSync(importLocal: importLocal, fileConnection: connection, transportKind: "file") else { return }
-            let defaults = syncDefaults
-            defaults.set(encoded, forKey: "cubic.sync.fileConnection")
-            defaults.set(connection.metadata.remoteBinding.rawValue, forKey: "cubic.sync.activeAccount")
-            defaults.set("file", forKey: "cubic.sync.transport")
-            await refreshSync()
-        } catch { reportFailure("文件同步未能连接", message: error.localizedDescription) }
+        }
     }
-    func disconnectRemoteSync() async {
-        guard await prepareSync(importLocal: false, transportKind: "local") else { return }
-        syncDefaults.set("local", forKey: "cubic.sync.transport")
-        await refreshSync()
+    func stopSync() { syncLoop?.cancel(); syncLoop = nil }
+    private func scheduleSync() {
+        guard fileSyncConnection != nil else { return }
+        syncState.phase = .pending
+        Task { await refreshSync() }
     }
-    func resolveSyncConflict(_ conflict: SyncConflict, revisionID: String?, removingDependencyIDs: Set<String>) async {
-        let messageContext = messageContextVersion
-        do {
-            if conflict.kind == .dependencyCycle {
-                let links = Set(conflict.paths.filter { $0.collection == "workLinks" }.map(\.entityID))
-                try await cloudSync?.resolveRelationships(conflictID: conflict.id,
-                    removingDependencyIDs: removingDependencyIDs.subtracting(links), removingWorkLinkIDs: removingDependencyIDs.intersection(links))
-            } else if let revisionID {
-                try await cloudSync?.resolve(conflictID: conflict.id, choosingRevisionID: revisionID)
+    func refreshSync() async {
+        guard let store, let connection = fileSyncConnection else { return }
+        guard !syncing else { syncAgain = true; return }
+        syncing = true
+        defer { syncing = false }
+        repeat {
+            syncAgain = false
+            do {
+                let outcome = try await SyncFolder.withAccess(connection) { try await store.sync(folder: $0) }
+                switch outcome {
+                case .waitingForDownload:
+                    syncState.phase = .waiting
+                    continue
+                case .downloaded, .conflict(keptThisDevice: false, _):
+                    await publish(await store.document)
+                default: break
+                }
+                if case .conflict(_, let backupName) = outcome {
+                    syncState.message = "两台设备都修改过数据，已保留较新的版本。另一份保存为同步目录中的 \(backupName)。"
+                } else if syncState.phase == .failed {
+                    syncState.message = nil
+                }
+                syncState.phase = .synced
+                syncState.lastSyncedAt = Date()
+            } catch {
+                syncState.phase = .failed
+                syncState.message = error.localizedDescription
             }
-            if let projection = cloudSync?.projection { await applySyncProjection(projection) }
-        } catch { _ = retainLocalRecovery(error); reportFailure("同步冲突未能处理", message: "冲突尚未处理完成，原记录已保留。\(error.localizedDescription)", context: messageContext) }
+        } while syncAgain
     }
-    func syncRevision(id: String) async -> SyncRevision? { await syncJournal?.revision(id: id) }
+    func inspectSyncDirectory(_ url: URL) -> FileSyncDirectoryInspection? {
+        do { return try SyncFolder.inspect(url) }
+        catch { reportFailure("同步目录未能读取", message: error.localizedDescription); return nil }
+    }
+    func connectSyncDirectory(_ inspection: FileSyncDirectoryInspection, start: FolderSyncStart) async {
+        do {
+            guard let store else { throw CoreError.invalid("本机保存服务尚未准备好。") }
+            let connection = try SyncFolder.connection(for: inspection.directory)
+            let outcome = try await SyncFolder.withAccess(connection) { try await store.connect(folder: $0, start: start) }
+            syncDefaults.set(try JSONEncoder().encode(connection), forKey: "cubic.sync.folder")
+            if outcome == .downloaded { await publish(await store.document) }
+            syncState = SyncState(phase: .synced, lastSyncedAt: Date())
+            startSync()
+        } catch { reportFailure("同步目录未能连接", message: error.localizedDescription) }
+    }
+    func disconnectSync() async {
+        stopSync()
+        do { try await store?.disconnect() }
+        catch { reportFailure("同步未能断开", message: error.localizedDescription); return }
+        syncDefaults.removeObject(forKey: "cubic.sync.folder")
+        syncState = SyncState()
+    }
     private var businessNames: [String: String] {
         if cachedBusinessNames == nil {
             var pairs = workspace.items.map { ($0.id, $0.name) }
@@ -1257,130 +933,38 @@ extension AppBackup: Codable {
         // Completion diagnostics separate object IDs with this delimiter, including nested nodes.
         return issue.components(separatedBy: ": ").map { names[$0] ?? $0 }.joined(separator: "：")
     }
-    func syncRecordSummary(collection: String, id: String) -> String {
-        let raw = syncProjection?.workspace ?? workspace
-        func name(_ id: String) -> String { raw.items.first { $0.id == id }?.name ?? raw.nodes.first { $0.id == id }?.name ?? raw.blockers.first { $0.id == id }?.name ?? raw.projects.first { $0.id == id }?.name ?? "原记录" }
-        switch collection {
-        case "projectTemplates":
-            if let template = raw.projectTemplate(id: id) {
-                return "项目模板：\(template.title)\n\(template.payload?.project.name ?? "内容暂不可用")"
-            }
-        case "@preferences": return "Cubic 设置"
-        case "workSessions":
-            if let record = raw.workSessions.first(where: { $0.id == id }) {
-                return "\(name(record.itemID))\n第 \(record.round ?? 1) 轮 · 投入 \(minutesLabel(record.actualMinutes))\n\((record.recordedAt ?? record.end).formatted(date: .abbreviated, time: .shortened))"
-            }
-        case "estimateRevisions":
-            if let record = raw.estimateRevisions?.first(where: { $0.id == id }) {
-                return "\(name(record.itemID)) · 第 \(record.round) 轮\n估计 \(minutesLabel(record.minutes))\n\(record.date.formatted(date: .abbreviated, time: .shortened))\n\(record.note)"
-            }
-        case "history":
-            if let record = raw.history.first(where: { $0.id == id }) {
-                return "\(name(record.objectID)) · \(ProjectUI.historyLabel(record.kind))\n原值 \(minutesLabel(record.previousMinutes)) → 记录值 \(minutesLabel(record.minutes))\n\(record.date.formatted(date: .abbreviated, time: .shortened))"
-            }
-        case "workRounds":
-            if let record = raw.workRounds?.first(where: { $0.id == id }) {
-                return "\(name(record.itemID))\n第 \(record.round) 轮\n首次估计 \(minutesLabel(record.initialMinutes)) · 开工前估计 \(minutesLabel(record.preStartMinutes))\n\(record.completedAt.map { "完成于 " + $0.formatted(date: .abbreviated, time: .shortened) } ?? record.startedAt.map { "开始于 " + $0.formatted(date: .abbreviated, time: .shortened) } ?? "本轮未记录开始时间")"
-            }
-        case "blockerRounds":
-            if let record = raw.blockerRounds?.first(where: { $0.id == id }) {
-                return "\(name(record.blockerID)) · 第 \(record.round) 轮\n\(record.triggeredAt.map { "发起 " + $0.formatted(date: .abbreviated, time: .shortened) } ?? "未记录开始时间")\n\(record.resolvedAt.map { "解除 " + $0.formatted(date: .abbreviated, time: .shortened) } ?? "等待尚未结束")"
-            }
-        case "dependencies":
-            if let dependency = raw.dependencies.first(where: { $0.id == id }) { return "\(name(dependency.source.id)) → \(name(dependency.targetItemID))" }
-        case "workLinks":
-            if let link = raw.workLinks?.first(where: { $0.id == id }) { return "\(name(link.source.id)) → \(name(link.nodeID ?? link.projectID))" }
-        default: return name(id)
-        }
-        return "版本 \(id.prefix(8))；原记录保留"
-    }
-    func resolveSyncDeletion(_ conflict: SyncConflict, archive: Bool) async {
-        let messageContext = messageContextVersion
-        do {
-            try await cloudSync?.resolveDeletion(conflictID: conflict.id, archive: archive)
-            if let value = cloudSync?.projection { await applySyncProjection(value) }
-        } catch { _ = retainLocalRecovery(error); reportFailure("关联冲突未能处理", message: "关联冲突尚未处理完成，原记录已保留。\(error.localizedDescription)", context: messageContext) }
-    }
-    func resolveSyncRecord(_ conflict: SyncConflict, entityID: String) async {
-        let messageContext = messageContextVersion
-        do {
-            try await cloudSync?.resolveSemanticRecord(conflictID: conflict.id, choosingEntityID: entityID)
-            if let value = cloudSync?.projection { await applySyncProjection(value) }
-        } catch { _ = retainLocalRecovery(error); reportFailure("历史版本未能选定", message: "尚未选定历史版本，原记录已保留。\(error.localizedDescription)", context: messageContext) }
-    }
-    func resolveSyncReview(_ conflict: SyncConflict, outcome: ReviewOutcome) async {
-        let messageContext = messageContextVersion
-        guard let projected = syncProjection?.planningWorkspace else { return }
-        do {
-            var candidate = projected
-            for id in conflict.affectedItemIDs {
-                guard let item = candidate.items.first(where: { $0.id == id }), item.needsReview else { continue }
-                try candidate.reviewItem(id: id, outcome: outcome, now: Date(), note: "人工处理并发前置变化")
-            }
-            try await cloudSync?.resolveInvariant(conflictID: conflict.id, workspace: candidate)
-            if let value = cloudSync?.projection { await applySyncProjection(value) }
-        } catch { _ = retainLocalRecovery(error); reportFailure("复核未完成", message: "复核尚未完成，原记录已保留。\(error.localizedDescription)", context: messageContext) }
-    }
+    /// A backup is the whole document: workspace plus synced settings.
     func exportBackup() async -> Data? {
         let messageContext = messageContextVersion
         do {
-            guard !saving, let cloudSync else { throw CoreError.invalid("暂时无法导出完整备份，请稍后重试。") }
-            let original = workspace, settings = preferences
-            let archive = try await cloudSync.exportArchive()
-            guard !saving, original == workspace else { throw CoreError.invalid("导出期间数据发生变化，请重新导出最新备份。") }
-            let copy = AppBackup(workspace: original, preferences: settings, syncArchive: archive)
-            let data = try await Task.detached {
+            guard !saving, let store else { throw CoreError.invalid("暂时无法导出备份，请稍后重试。") }
+            let document = await store.document
+            return try await Task.detached {
                 let encoder = JSONEncoder()
-                encoder.dateEncodingStrategy = .millisecondsSince1970
                 encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-                return try encoder.encode(copy)
+                return try encoder.encode(document)
             }.value
-            guard data.count <= 64 * 1024 * 1024 else { throw BackupError.tooLarge }
-            return data
         } catch { reportFailure("备份未能导出", message: error.localizedDescription, context: messageContext); return nil }
     }
+    /// Replaces the current data with the backup. The replaced data reaches other devices as an ordinary edit.
     func importBackup(_ data: Data) async -> Bool {
         let messageContext = messageContextVersion
-        guard !saving, pendingLocalSave == nil else { return false }
+        guard !saving, let store else { return false }
         saving = true
         defer { finishWrite() }
-        var factsImported = false
         do {
-            guard data.count <= 64 * 1024 * 1024 else { throw BackupError.tooLarge }
             let backup = try await Task.detached {
-                let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .millisecondsSince1970
-                let backup = try decoder.decode(AppBackup.self, from: data)
-                guard (1...2).contains(backup.schemaVersion), backup.schemaVersion != 2 || backup.syncArchive != nil else { throw BackupError.unsupported }
-                try backup.workspace.validate(); try backup.preferences.validate()
+                let backup = try JSONDecoder().decode(WorkspaceDocument.self, from: data)
+                try backup.workspace.validate()
                 return backup
             }.value
-            let committed: Workspace
-            if let archive = backup.syncArchive {
-                guard let cloudSync else { throw CoreError.invalid("暂时无法导入备份，请稍后重试。") }
-                let result = try await cloudSync.restoreArchive(archive)
-                guard result.planningIsValid else {
-                    await publishCanonicalProjection(result)
-                    throw CoreError.invalid("原数据已保留。还有同步冲突需要到设置处理，当前数据未被覆盖。")
-                }
-                syncProjection = result
-                committed = result.planningWorkspace
-            } else {
-                committed = try await journalLocalWorkspace(backup.workspace)
-            }
-            factsImported = true
-            await persistDurableProjection(committed)
-            workspace = committed
-            guard let cloudSync else { throw CoreError.invalid("本机保存服务尚未准备好。") }
-            let preferenceResult = try await cloudSync.recordPreferences(backup.preferences.syncValues(calendars: calendar.calendars))
-            await publishCanonicalProjection(preferenceResult)
-            revision += 1
-            await refresh()
-            reportStatus(backup.syncArchive != nil ? "备份已合并。有不同版本的内容时，请到设置处理同步冲突。" : "旧版备份已导入。这个格式不包含完整的同步修改历史。", context: messageContext)
+            await publish(try await store.save(workspace: backup.workspace, preferences: backup.preferences))
+            scheduleSync()
+            reportStatus("备份已恢复。", context: messageContext)
             return true
         } catch {
-            let partial = retainLocalRecovery(error)
-            let detail = partial ? "已有记录需要恢复核对，请勿重复导入。" : factsImported ? "备份事实已导入，偏好导入尚未完成。" : "尚未完成导入；已写入的恢复事实和原记录保留。"
-            reportFailure("备份导入需核对", message: "\(detail) \(error.localizedDescription)", context: messageContext); return false
+            reportFailure("备份未能导入", message: "原数据未改变。\(error.localizedDescription)", context: messageContext)
+            return false
         }
     }
     func renewDemoWindow() async {

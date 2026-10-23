@@ -58,7 +58,7 @@ extension Workspace {
                 guard seconds >= Double(item.continuousMinutes ?? remaining) * 60 else { throw CoreError.invalid("这项工作需要连续时间，请放置足够长的时间块。") }
             }
             draft.timeBlocks = others + [block]
-            draft.appendHistory(.timeBlockChanged, id: item.id, now: now, note: "设置日历时间块，不改变实际投入或剩余", detail: String(decoding: try SyncCoding.encode(block), as: UTF8.self))
+            draft.appendHistory(.timeBlockChanged, id: item.id, now: now, note: "设置日历时间块，不改变实际投入或剩余", detail: String(decoding: try JSONCoding.encode(block), as: UTF8.self))
         }
     }
     public mutating func removeTimeBlock(id: String, now: Date) throws {

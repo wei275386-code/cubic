@@ -33,7 +33,6 @@ enum NoticeCopy {
     static func title(_ notice: RiskNotice) -> String {
         switch notice.kind {
         case "capacityConflict": return notice.body.hasPrefix("前置时间") || notice.body.hasPrefix("预计最早") ? "交付时间赶不上截止" : "截止前的时间不够"
-        case "syncConflict": return "有同步冲突需要处理"
         case "projectRisk": return replacingPrefix("需要取舍：", with: "请检查安排：", in: notice.title)
         case "waitingExpected": return replacingPrefix("确认等待状态：", with: "确认等待是否结束：", in: notice.title)
         case "review": return "前置已变化，请复核成果"
@@ -43,7 +42,6 @@ enum NoticeCopy {
     }
     static func summary(_ notice: RiskNotice) -> String {
         switch notice.kind {
-        case "syncConflict": return "请到设置选择要使用的版本。其他工作可以继续。"
         case "waitingExpected": return "到预计结束时间后，请确认等待是否已结束。跟进日期可以单独设置。"
         case "acceptanceFailed":
             return notice.body.hasPrefix("已保留失败结果") || notice.body.hasPrefix("返工范围已确认") ? "返工范围已确认，请检查返工和需要复核的后续成果。" : "请确认哪些工作需要返工，或添加新的返工工作。"
@@ -87,7 +85,7 @@ enum RiskNoticeEngine {
             $0.date == $1.date ? $0.id < $1.id : $0.date < $1.date
         }) {
             guard let detail = event.detail, let data = detail.data(using: .utf8),
-                  let notice = try? SyncCoding.decode(RiskNotice.self, from: data) else { continue }
+                  let notice = try? JSONCoding.decode(RiskNotice.self, from: data) else { continue }
             if var previous = result[notice.id] {
                 // Acknowledgement is monotonic for the same unchanged root cause.
                 var value = notice
@@ -99,11 +97,11 @@ enum RiskNoticeEngine {
         return result.values.sorted { $0.changedAt > $1.changedAt }
     }
     static func event(_ notice: RiskNotice, at date: Date) throws -> HistoryEvent {
-        let data = try SyncCoding.encode(notice)
+        let data = try JSONCoding.encode(notice)
         return HistoryEvent(date: date, kind: .edited, objectID: notice.rootObjectID,
                             note: historyMarker, detail: String(decoding: data, as: UTF8.self))
     }
-    static func changes(workspace: Workspace, planning: PlanningSnapshot, now: Date, conflicts: [SyncConflict] = []) -> [RiskNotice] {
+    static func changes(workspace: Workspace, planning: PlanningSnapshot, now: Date) -> [RiskNotice] {
         let previous = Dictionary(uniqueKeysWithValues: stored(in: workspace).map { ($0.id, $0) })
         // Archive hides reminders the same way project and risk lists hide scope. Planning demand is unchanged.
         let visibility = PlanningDisplay.PlanningVisibility(workspace: workspace) { Set($0.projectIDs) }
@@ -148,13 +146,6 @@ enum RiskNoticeEngine {
                 body: (delay.map { "前置时间至少延迟 \($0) 分钟。" } ?? "共同窗口内劳动至少缺 \(certificate.shortageMinutes) 分钟。") + "查看共同根因与关联工作，可调整范围、窗口或下一步。",
                 projects: projects, items: items, due: nil,
                 fingerprint: "\(rootKey):\(max(1, magnitude) / 15):\(projects.joined(separator: ","))")
-        }
-        for conflict in conflicts {
-            guard let root = conflict.affectedItemIDs.first ?? workspace.projects.first?.id ?? workspace.items.first?.id else { continue }
-            let projects = Set(workspace.items.filter { conflict.affectedItemIDs.contains($0.id) }.flatMap(\.projectIDs))
-            add(id: "sync.\(conflict.id)", root: root, kind: "syncConflict", title: "需要确认并发事实",
-                body: "\(conflict.message) 原始事实均保留；可在设置处理，其他工作继续。",
-                projects: Array(projects), items: conflict.affectedItemIDs, due: nil, fingerprint: conflict.id)
         }
         for assessment in planning.projects {
             guard let project = workspace.projects.first(where: { $0.id == assessment.projectID }),

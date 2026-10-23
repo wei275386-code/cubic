@@ -55,14 +55,7 @@ struct TrialView: View {
                 if computing || model.isRefreshing {
                     Section { ProgressView("正在计算影响…") }
                 }
-                if !model.canVerifyPlanning {
-                    Section {
-                        Label("还有同步冲突未处理，暂时无法试算。", systemImage: "exclamationmark.triangle")
-                            .fixedSize(horizontal: false, vertical: true)
-                        NavigationLink("处理同步冲突") { SyncConflictListView() }
-                    }
-                }
-                if let result, !computing, model.canVerifyPlanning {
+                if let result, !computing {
                     Section("本次试算") {
                         Text("计算于 \(result.source.input.now.formatted(date: .abbreviated, time: .shortened))")
                         if let start = result.startPosition { Text("预计开始：\(start.formatted(date: .abbreviated, time: .shortened))") }
@@ -100,10 +93,10 @@ struct TrialView: View {
                         if refreshedForConfirmation { Text("结果已更新，请查看后再确认。") }
                         Button("接下来做这个") { Task { await confirm(result) } }
                             .buttonStyle(.borderedProminent).foregroundStyle(Color.cubicOnAccent).frame(minHeight: 44)
-                            .disabled(model.saving || confirming || model.isRefreshing || !model.canVerifyPlanning)
+                            .disabled(model.saving || confirming || model.isRefreshing)
                             .accessibilityIdentifier("confirm-next-action")
                     } footer: { Text("确认后设为下一步。开始工作时再计时，结束后记录投入和剩余时间。") }
-                } else if !computing, validation == nil, result == nil, model.canVerifyPlanning {
+                } else if !computing, validation == nil, result == nil {
                     Section {
                         Text("这次试算未能完成。可调整投入时长重试，或直接设为下一步。")
                         Button("直接设为下一步") { Task { if await model.chooseNextAction(itemID: itemID, note: note + " · 最新影响未核验") { dismiss() } } }
@@ -132,7 +125,6 @@ struct TrialView: View {
     private func calculate() async {
         generation += 1
         let current = generation
-        guard model.canVerifyPlanning else { result = nil; computing = false; validation = nil; return }
         let text = minutes.trimmingCharacters(in: .whitespacesAndNewlines)
         guard text.isEmpty || (text.allSatisfy({ $0.isASCII && $0.isNumber }) && Int(text).map { (1...5256000).contains($0) } == true) else {
             validation = "请输入大于 0 的整数分钟；也可以留空。"; result = nil; computing = false; return
@@ -166,9 +158,6 @@ struct TrialView: View {
             let display = await Task.detached(priority: .userInitiated) { PlanningCertificateContext(latest) }.value
             guard isVisible, key == calculationKey, !Task.isCancelled else { return }
             conflictContext = display; result = latest; refreshedForConfirmation = true
-        case .recoveryRequired:
-            // The operation retains its receipt. A later confirmation settles it without another choice.
-            refreshedForConfirmation = true
         case .unavailable:
             break
         }

@@ -43,7 +43,6 @@ struct PlanningGraph {
          estimatedCompletions: [String: Date] = [:], counterfactualItemIDs: Set<String> = [],
          scheduledFinishes: [String: Date] = [:]) throws {
         let options = input.options
-        let disputed = Set(options.disputedItemIDs)
         items = Dictionary(uniqueKeysWithValues: workspace.items.map { ($0.id, $0) })
         links = (workspace.workLinks ?? []).filter { $0.removedAt == nil && $0.isRequired }
         let nodes = Dictionary(uniqueKeysWithValues: workspace.nodes.map { ($0.id, $0) })
@@ -65,10 +64,10 @@ struct PlanningGraph {
             if required(item), let nodeID = item.nodeID {
                 nodeMembers[nodeID, default: []].insert(item.id)
             }
-            let actual = domainIndex.itemValid(item.id) && !disputed.contains(item.id)
+            let actual = domainIndex.itemValid(item.id)
             let known = actual ? 0 : max(0, Double(item.remainingMinutes ?? 0) * 60 - (reductions[item.id] ?? 0))
             let unknown = !actual && (item.remainingMinutes == nil ||
-                ((item.needsReview || disputed.contains(item.id) || item.status == .completed) && !counterfactualItemIDs.contains(item.id)) || item.effectiveDisposition == .cancelled)
+                ((item.needsReview || item.status == .completed) && !counterfactualItemIDs.contains(item.id)) || item.effectiveDisposition == .cancelled)
             var vertex = PlanningVertex(key: "item:\(item.id)", objectID: item.id, kind: .item,
                                         knownSeconds: known, energy: item.energy,
                                         continuous: item.requiresContinuous, unknown: unknown, actual: actual)
@@ -93,24 +92,6 @@ struct PlanningGraph {
             if let deadline = options.itemDeadlines[item.id] ?? item.deadline, item.effectiveDisposition != .cancelled {
                 directDeadlines[vertex.key] = deadline
             }
-        }
-        var disputedNodes = Set(nodeMembers.filter { !$0.value.isDisjoint(with: disputed) }.map(\.key))
-        var nodeConsumers: [String: Set<String>] = [:]
-        for (target, references) in nodeLinks {
-            for reference in references {
-                switch reference {
-                case .item(let id): if disputed.contains(id) { disputedNodes.insert(target) }
-                case .node(let id): nodeConsumers[id, default: []].insert(target)
-                }
-            }
-        }
-        for node in workspace.nodes {
-            if let predecessor = node.sequentialPredecessorNodeID { nodeConsumers[predecessor, default: []].insert(node.id) }
-        }
-        var disputedQueue = disputedNodes.sorted(), disputedCursor = 0
-        while disputedCursor < disputedQueue.count {
-            let id = disputedQueue[disputedCursor]; disputedCursor += 1
-            for target in nodeConsumers[id] ?? [] where disputedNodes.insert(target).inserted { disputedQueue.append(target) }
         }
         for blocker in workspace.blockers {
             let wait = waits[blocker.id]
@@ -147,7 +128,7 @@ struct PlanningGraph {
         }
         for node in workspace.nodes {
             let key = "node:\(node.id)", requiredGates = gates[key] ?? []
-            let actual = domainIndex.sourceSatisfied(.node(node.id)) && !disputedNodes.contains(node.id)
+            let actual = domainIndex.sourceSatisfied(.node(node.id))
             var vertex = PlanningVertex(key: key, objectID: node.id, kind: .node,
                 unknown: !actual && (node.needsReview == true || (requiredGates.isEmpty && (nodeMembers[node.id] ?? []).isEmpty)), actual: actual)
             if !actual {
@@ -260,7 +241,7 @@ struct PlanningGraph {
         let actualNodes = Dictionary(uniqueKeysWithValues: workspace.nodes.map { ($0.id, vertices["node:\($0.id)"]?.actual == true) })
         for item in workspace.items {
             var reasons: [BlockReason] = []
-            if item.needsReview || disputed.contains(item.id) { reasons.append(.needsReview) }
+            if item.needsReview { reasons.append(.needsReview) }
             for dependency in dependencies[item.id] ?? [] {
                 let satisfied: Bool
                 switch dependency.source {

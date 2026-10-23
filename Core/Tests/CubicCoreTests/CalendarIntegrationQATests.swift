@@ -23,20 +23,20 @@ import Testing
         var reduced = valid; reduced.items[0].remainingMinutes = 15
         var unknown = valid; unknown.items[0].remainingMinutes = nil
         for input in [completed, archived, blocked, review, reduced, unknown] {
-            let original = try SyncCoding.encode(input)
+            let original = try JSONCoding.encode(input)
             let issues = try input.calendarTimeBlockIssues(slots: slots, now: now)
             #expect(issues["reservation"] != nil)
-            #expect(try SyncCoding.encode(input) == original)
+            #expect(try JSONCoding.encode(input) == original)
             #expect(input.timeBlocks == valid.timeBlocks)
         }
     }
 
     @Test func workScheduleAndExternalBusyChangesInvalidateReservationWithoutRemovingIt() throws {
-        let input = workspace(), bytes = try SyncCoding.encode(input)
+        let input = workspace(), bytes = try JSONCoding.encode(input)
         #expect(try input.calendarTimeBlockIssues(slots: [], now: now)["reservation"] != nil)
         let occupied = BusyInterval(start: at(40), end: at(50))
         #expect(try input.calendarTimeBlockIssues(slots: slots, busy: [occupied], now: now)["reservation"] != nil)
-        #expect(try SyncCoding.encode(input) == bytes)
+        #expect(try JSONCoding.encode(input) == bytes)
         #expect(input.timeBlocks?.count == 1)
     }
 
@@ -57,9 +57,9 @@ import Testing
         for (start, end) in [(30, 90), (45, 75)] {
             var input = workspace()
             input.timeBlocks?[0].start = at(start); input.timeBlocks?[0].end = at(end)
-            let bytes = try SyncCoding.encode(input)
+            let bytes = try JSONCoding.encode(input)
             #expect(try input.calendarTimeBlockIssues(slots: slots, mappedBusy: ["reservation": [ownOldEvent]], now: now).isEmpty)
-            #expect(try SyncCoding.encode(input) == bytes)
+            #expect(try JSONCoding.encode(input) == bytes)
             // A second block moved elsewhere in Cubic, but its old Calendar event still occupies this interval.
             input.items.append(WorkItem(id: "other-work", name: "Other", remainingMinutes: 30))
             input.timeBlocks?.append(WorkTimeBlock(id: "other-block", itemID: "other-work", start: at(120), end: at(150)))

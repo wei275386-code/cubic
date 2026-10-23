@@ -11,7 +11,7 @@ private func fixWorkspace() -> Workspace {
         acceptances: [Acceptance(id: "a", subject: .item("i"), name: "Quality", state: .accepted, acceptedAt: fixNow,
                                 candidateItemIDs: ["candidate"], candidateBlockerIDs: ["b"])])
 }
-@Test func fixTemplateCandidatesRemapAndPersistAcrossStorageAndSync() throws {
+@Test func fixTemplateCandidatesRemapAndPersistAcrossStorage() throws {
     var w = fixWorkspace(); try w.validate()
     let id = try w.saveProjectTemplate(projectID: "p", title: "Candidates", now: fixNow)
     let payload = try #require(w.projectTemplate(id: id)?.payload)
@@ -27,15 +27,11 @@ private func fixWorkspace() -> Workspace {
     let blockerID = try #require(acceptance.candidateBlockerIDs?.first)
     #expect(blockerID != "b" && blockerID != payload.blockers.first?.id)
     #expect(w.blockers.first { $0.id == blockerID }?.resolutionCondition == "Signed")
-    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("TemplateFix-\(UUID().uuidString)")
-    defer { try? FileManager.default.removeItem(at: dir) }
-    let repo = try SQLiteWorkspaceRepository(url: dir.appendingPathComponent("qa.sqlite")); try repo.save(w)
-    #expect(try repo.load() == w)
-    let revision = try SyncRevision.recording(workspace: w, workspaceID: "fix", deviceID: "qa", parents: [], createdAt: fixNow)
-    let merged = try SyncMerge.merge(revisions: [revision], workspaceID: "fix")
-    #expect(merged.workspace.projectTemplate(id: id)?.payload == payload)
-    #expect(merged.workspace.acceptances.first { $0.id == acceptance.id }?.candidateItemIDs == acceptance.candidateItemIDs)
-    #expect(merged.workspace.acceptances.first { $0.id == acceptance.id }?.candidateBlockerIDs == acceptance.candidateBlockerIDs)
+    let stored = try persistedCopy(w)
+    #expect(stored == w)
+    #expect(stored.projectTemplate(id: id)?.payload == payload)
+    #expect(stored.acceptances.first { $0.id == acceptance.id }?.candidateItemIDs == acceptance.candidateItemIDs)
+    #expect(stored.acceptances.first { $0.id == acceptance.id }?.candidateBlockerIDs == acceptance.candidateBlockerIDs)
 }
 @Test func fixTemplateExternalAndExcludedCandidatesBlockAtomicallyWithReadableNames() throws {
     for excluded in [false, true] {
@@ -67,34 +63,6 @@ private func fixWorkspace() -> Workspace {
         #expect(throws: CoreError.self) { try w.instantiateProjectTemplate(templateID: template.id, deadline: fixNow, timeZoneID: "UTC", dateOnly: false, now: fixNow) }
         #expect(w == before)
     }
-}
-
-/// Reproduce the journal interleaving allowed by mutateProjectTemplate's await + deferred UI projection.
-@Test func fixTemplatePreparedSnapshotMustNotOverwriteNewRemoteState() async throws {
-    let initial = fixWorkspace()
-    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("TemplateRace-\(UUID().uuidString)")
-    defer { try? FileManager.default.removeItem(at: dir) }
-    let journal = try SyncJournal(directory: dir, workspaceID: "race", deviceID: "local")
-    let root = try await journal.bootstrap(workspace: initial)
-    var prepared = initial // AppModel captured this snapshot before Task.detached.
-    _ = try prepared.saveProjectTemplate(projectID: "p", title: "Saved", now: fixNow)
-    var remote = root.workspace; remote.projects[0].name = "Remote new project name"
-    let remoteRevision = try SyncRevision.recording(workspace: remote, comparedTo: root.workspace, workspaceID: "race", deviceID: "remote", parents: root.heads, createdAt: fixNow.addingTimeInterval(1))
-    _ = try await journal.ingest([remoteRevision], cursor: nil)
-    #expect(try await journal.snapshot().workspace.projects.first { $0.id == "p" }?.name == "Remote new project name")
-    await #expect(throws: CoreError.self) {
-        _ = try await journal.record(workspace: prepared, currentChoiceID: nil, expectedHeads: root.heads)
-    }
-    let result = try await journal.snapshot()
-    print("TEMPLATE_PREPARE_RACE incoming_name=Remote new project name committed_name=\(result.workspace.projects.first { $0.id == "p" }?.name ?? "missing") conflicts=\(result.conflicts.count)")
-    #expect(result.workspace.projects.first { $0.id == "p" }?.name == "Remote new project name", "Template-only mutation must not write unrelated stale project metadata")
-    #expect(result.heads == [remoteRevision.id])
-    #expect(result.workspace.projectTemplates?.isEmpty != false, "Rejected preparation must not append a partial template")
-    var refreshed = result.planningWorkspace
-    _ = try refreshed.saveProjectTemplate(projectID: "p", title: "Saved after refresh", now: fixNow)
-    let retry = try await journal.record(workspace: refreshed, currentChoiceID: nil, expectedHeads: result.heads)
-    #expect(retry.workspace.projects[0].name == "Remote new project name")
-    #expect(retry.workspace.projectTemplates?.count == 1)
 }
 
 /// Measures the corrected defaults-first command boundary, including candidate configuration.

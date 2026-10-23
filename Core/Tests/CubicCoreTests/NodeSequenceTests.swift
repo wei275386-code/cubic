@@ -134,22 +134,12 @@ import Testing
         #expect(w.nodes.first { $0.id == "b" }?.sequentialPredecessorNodeID == nil)
     }
 
-    @Test func jsonSQLiteAndSyncDocumentPreserveSequence() throws {
+    @Test func storagePreservesSequence() throws {
         var w = base()
         try w.reorderProjectNodes(projectID: "p", orderedNodeIDs: ["c", "a", "b"], now: t)
-        let decoded = try JSONDecoder().decode(Workspace.self, from: JSONEncoder().encode(w))
-        #expect(decoded == w)
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("NodeSequenceQA-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let url = directory.appendingPathComponent("qa.sqlite")
-        try SQLiteWorkspaceRepository(url: url).save(w)
-        #expect(try SQLiteWorkspaceRepository(url: url).load() == w)
-        let sync = try SyncDocument.workspace(SyncDocument(w, choice: nil).values)
-        // SyncDocument canonicalizes collection array order; compare facts by identity.
-        #expect(sync.nodes.sorted { $0.id < $1.id } == w.nodes.sorted { $0.id < $1.id })
-        #expect(sync.items.sorted { $0.id < $1.id } == w.items.sorted { $0.id < $1.id })
-        #expect(sync.history.sorted { $0.id < $1.id } == w.history.sorted { $0.id < $1.id })
-        #expect(predecessors(sync) == [nil, "c", "a"])
+        let stored = try persistedCopy(w)
+        #expect(stored == w)
+        #expect(predecessors(stored) == [nil, "c", "a"])
     }
 
     @Test func markdownAndBothTemplateRemapsUseNewNodeIdentities() throws {
@@ -243,68 +233,7 @@ import Testing
         try w.validate()
     }
 
-    @Test func concurrentReordersKeepAtomicOrderAndResolveEitherWholeBranch() async throws {
-        var root = base(["z", "y", "x"])
-        root.items.append(WorkItem(id: "shared-downstream", name: "共享下游", projectIDs: ["q"], remainingMinutes: 10))
-        root.items.append(WorkItem(id: "free", name: "独立", projectIDs: ["q"], remainingMinutes: 10))
-        root.dependencies = [Dependency(id: "shared", source: .node("x"), targetItemID: "shared-downstream")]
-        var left = root, right = root
-        try left.reorderProjectNodes(projectID: "p", orderedNodeIDs: ["y", "z", "x"], now: t)
-        try right.reorderProjectNodes(projectID: "p", orderedNodeIDs: ["z", "x", "y"], now: t)
-        let r0 = try SyncRevision.recording(workspace: root, id: "root", workspaceID: "concurrent-order", deviceID: "qa", parents: [], createdAt: t)
-        let a = try SyncRevision.recording(workspace: left, comparedTo: root, id: "left", workspaceID: "concurrent-order", deviceID: "a", parents: [r0.id], createdAt: t)
-        let b = try SyncRevision.recording(workspace: right, comparedTo: root, id: "right", workspaceID: "concurrent-order", deviceID: "b", parents: [r0.id], createdAt: t)
-        let merged = try SyncMerge.merge(revisions: [r0, a, b], workspaceID: "concurrent-order")
-        let reverse = try SyncMerge.merge(revisions: [b, r0, a], workspaceID: "concurrent-order")
-        #expect(merged.workspace == reverse.workspace && merged.conflicts == reverse.conflicts && merged.pausedItemIDs == reverse.pausedItemIDs)
-        #expect(merged.conflicts.count == 1)
-        #expect(merged.conflicts.first?.paths == [SyncPath(collection: "projects", entityID: "p", field: SyncDocument.nodeSequence)])
-        let nodes = merged.workspace.projectStructure(projectID: "p").nodes
-        #expect([left, right].contains { $0.projectStructure(projectID: "p").nodes == nodes })
-        #expect(nodes.map(\.sequentialPredecessorNodeID) == [nil, nodes[0].id, nodes[1].id])
-        #expect(merged.pausedItemIDs == Set(["i-x", "i-y", "i-z", "shared-downstream"]))
-        try merged.workspace.validate()
-        for (chosen, expected) in [("left", left), ("right", right)] {
-            let directory = FileManager.default.temporaryDirectory.appendingPathComponent("NodeSequenceConcurrentQA-\(UUID().uuidString)")
-            defer { try? FileManager.default.removeItem(at: directory) }
-            let journal = try SyncJournal(directory: directory, workspaceID: "concurrent-order", deviceID: "resolver")
-            try await journal.ingest([r0, a, b], cursor: nil)
-            let before = try await journal.snapshot()
-            let conflict = try #require(before.conflicts.first)
-            let resolved = try await journal.resolve(conflictID: conflict.id, choosingRevisionID: chosen)
-            #expect(resolved.workspace.projectStructure(projectID: "p").nodes == expected.projectStructure(projectID: "p").nodes)
-            #expect(resolved.conflicts.isEmpty && resolved.pausedItemIDs.isEmpty && resolved.planningIsValid)
-            try resolved.workspace.validate()
-            print("ATOMIC SEQUENCE resolved=\(chosen) order=\(resolved.workspace.projectStructure(projectID: "p").nodes.map(\.id)) conflicts=0 paused=0 planningValid=true")
-        }
-    }
-
-    @Test(arguments: ["forward", "reorder", "independent-order"]) func syncSemanticConflictFollowsReorderedNodeGraphRegardlessOfStorageOrder(mode: String) throws {
-        var root = base()
-        let reversed = mode != "forward"
-        if reversed { try root.reorderProjectNodes(projectID: "p", orderedNodeIDs: ["c", "b", "a"], now: t) }
-        if mode == "independent-order" {
-            // Legacy/imported structureOrder can differ from the managed chain. The domain accepts
-            // such imported/merged facts; graph propagation must not rely on this order.
-            for i in root.nodes.indices { root.nodes[i].structureOrder = i + 1 }
-        }
-        let sourceID = reversed ? "c" : "a"
-        root.nodes[root.nodes.firstIndex { $0.id == sourceID }!].blockerIDs = ["wait"]
-        root.blockers = [Blocker(id: "wait", name: "等待", state: .resolved, triggeredAt: t, resolvedAt: t)]
-        root.dependencies = [Dependency(id: "wait-work", source: .blocker("wait"), targetItemID: "i-" + sourceID)]
-        var left = root, right = root
-        left.blockerRounds = [BlockerRound(id: "left-round", blockerID: "wait", round: 1, triggeredAt: t, resolvedAt: t)]
-        right.blockerRounds = [BlockerRound(id: "right-round", blockerID: "wait", round: 1, triggeredAt: t, expectedDurationMinutes: 20, resolvedAt: t)]
-        let r0 = try SyncRevision.recording(workspace: root, id: "root", workspaceID: "sequence", deviceID: "qa", parents: [], createdAt: t)
-        let a = try SyncRevision.recording(workspace: left, comparedTo: root, id: "left", workspaceID: "sequence", deviceID: "a", parents: [r0.id], createdAt: t)
-        let b = try SyncRevision.recording(workspace: right, comparedTo: root, id: "right", workspaceID: "sequence", deviceID: "b", parents: [r0.id], createdAt: t)
-        let merged = try SyncMerge.merge(revisions: [r0, a, b], workspaceID: "sequence")
-        print("NODE SEQUENCE SYNC mode=\(mode) conflict paths=\(merged.conflicts.map(\.paths)) paused=\(merged.pausedItemIDs.sorted())")
-        #expect(merged.conflicts.contains { $0.kind == .semanticRecord })
-        #expect(merged.pausedItemIDs == Set(["i-a", "i-b", "i-c"]), "All downstream members must pause even when reordered opposite to their storage order")
-    }
-
-    @Test func scale1000NodesAndWorksIndexedGraphReorderAndSyncMerge() throws {
+    @Test func scale1000NodesAndWorksIndexedGraphReorderAndStorage() throws {
         func scale(_ n: Int) throws -> (Double, Double, Double) {
             var w = base((0..<n).map { "n\($0)" })
             let start = Date()
@@ -315,15 +244,14 @@ import Testing
             let reorderStart = Date()
             try w.reorderProjectNodes(projectID: "p", orderedNodeIDs: Array(w.nodes.map(\.id).reversed()), now: t)
             let reorder = Date().timeIntervalSince(reorderStart)
-            let revision = try SyncRevision.recording(workspace: w, id: "root", workspaceID: "scale", deviceID: "qa", parents: [], createdAt: t)
-            let mergeStart = Date()
-            let result = try SyncMerge.merge(revisions: [revision], workspaceID: "scale")
-            let merge = Date().timeIntervalSince(mergeStart)
-            #expect(result.planningIsValid && result.workspace.nodes.count == n && result.workspace.items.count == n)
-            return (indexed, reorder, merge)
+            let storageStart = Date()
+            let result = try persistedCopy(w)
+            let storage = Date().timeIntervalSince(storageStart)
+            #expect(result.nodes.count == n && result.items.count == n)
+            return (indexed, reorder, storage)
         }
         let small = try scale(250), large = try scale(1000)
-        print("NODE SEQUENCE PERF debug/macOS nodes/works=250 index=\(small.0) reorder=\(small.1) merge=\(small.2); nodes/works=1000 index=\(large.0) reorder=\(large.1) merge=\(large.2)")
+        print("NODE SEQUENCE PERF debug/macOS nodes/works=250 index=\(small.0) reorder=\(small.1) storage=\(small.2); nodes/works=1000 index=\(large.0) reorder=\(large.1) storage=\(large.2)")
         #expect(large.0 < max(0.25, small.0 * 10))
         #expect(large.1 < max(2, small.1 * 10))
         #expect(large.2 < max(5, small.2 * 10))

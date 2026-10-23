@@ -37,7 +37,7 @@ import UserNotifications
             CommandMenu("同步") {
                 Button("立即同步") { Task { await model.refreshSync() } }
                     .keyboardShortcut("r", modifiers: [.command, .shift])
-                    .disabled(model.loading || model.saving || model.syncStatus.phase == .syncing)
+                    .disabled(model.loading || model.syncDirectoryLabel == nil)
             }
             SidebarCommands()
         }
@@ -137,12 +137,11 @@ struct MacWorkspaceView: View {
         .onChange(of: scenePhase) { _, phase in
             guard !model.loading else { return }
             if phase == .active {
-                model.cloudSync?.start()
+                model.startSync()
                 model.calendarBridge?.start()
-                Task { await model.refresh(background: true); await model.refreshSync() }
+                Task { await model.refresh(background: true) }
             }
-            // A Mac app remains useful while another app has focus. Keep its
-            // bounded sync loop running until the process exits or sleeps.
+            // A Mac app remains useful while another app has focus, so its sync loop keeps running.
         }
         .onReceive(Timer.publish(every: 60, on: .main, in: .common).autoconnect()) { _ in
             if scenePhase == .active && !model.loading && !model.saving {
@@ -181,7 +180,7 @@ struct MacWorkspaceView: View {
             }.listStyle(.sidebar)
             VStack(alignment: .leading, spacing: 10) {
                 Button { navigation.startupRoute = nil; navigation.settings = true } label: {
-                    Label(model.syncStatus.phase.label, systemImage: model.syncStatus.phase == .synced ? "checkmark.icloud" : "icloud")
+                    Label(model.syncState.label, systemImage: model.syncState.phase == .synced ? "checkmark.icloud" : "icloud")
                         .font(.caption).foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }.buttonStyle(.plain).accessibilityIdentifier("mac.syncStatus")
@@ -213,7 +212,7 @@ struct MacWorkspaceView: View {
                 }.padding(.horizontal, 20).padding(.vertical, 10)
             }.buttonStyle(.plain).background(.regularMaterial)
                 .accessibilityIdentifier("serviceIssue.openSettings")
-        } else if model.activeModalCount == 0, model.syncTransportLabel == "仅本机", model.workspace == .empty {
+        } else if model.activeModalCount == 0, model.syncDirectoryLabel == nil, model.workspace == .empty {
             WorkspaceStartOptions { route in
                 navigation.startupRoute = route; navigation.settings = true
             }

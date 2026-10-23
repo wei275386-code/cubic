@@ -11,7 +11,7 @@ Cubic 是原生 iOS / macOS 个人项目与行动管理工具。它把项目、�
 - 日历页结合工作时段、精力、所选 Apple Calendar 的占用和工作时间块展示容量。时间块可拖动、编辑或移除，安排时间与实际投入分别记录。
 - 排期与试算展示截止约束、风险和选择影响。试算不会自动开始工作或修改执行进度。
 - 支持从 Markdown 创建项目，以及保存模板、调整截止时间后创建独立项目。
-- iOS 与 Mac 可选择同一个 iCloud Drive 目录进行文件同步，查看待上传、待下载和冲突状态。
+- iOS 与 Mac 可选择同一个 iCloud Drive 目录同步数据；两台设备都修改过时保留较新的版本，另一份作为备份文件留在目录中。
 - 支持 JSON 备份与恢复、工作历史、提醒，以及在明确授权后关联 Apple Calendar 事件。
 
 Mac 版提供侧栏、键盘命令和鼠标操作，与 iOS 共享主要领域逻辑和界面实现。
@@ -21,8 +21,8 @@ Mac 版提供侧栏、键盘命令和鼠标操作，与 iOS 共享主要领域�
 1. 首次打开是空工作空间。先在收件箱记录一项工作，或创建项目并添加节点与工作。
 2. 在设置中填写工作时段、时区和日历使用规则。读取日历、写入关联事件和通知各自需要系统授权。
 3. 在行动页选择下一步；未来安排放入日历时间块，已发生的劳动通过投入记录保存。
-4. 需要跨设备时，在两端设置中选择同一个 iCloud Drive 同步目录，并等待文件完整下载。每台设备分别授予目录访问权限；不要复制另一台设备的目录 bookmark。
-5. 更换安装或迁移前，可从设置导出 JSON 备份。恢复按事实合并，可能产生需要人工处理的冲突。
+4. 需要跨设备时，在两端设置中选择同一个 iCloud Drive 同步目录。每台设备分别授予目录访问权限。
+5. 更换安装或迁移前，可从设置导出 JSON 备份。恢复备份会替换当前数据。
 
 同步通过 iCloud Drive 中的普通文件目录完成，不使用 CloudKit。
 
@@ -47,7 +47,7 @@ Mac 版提供侧栏、键盘命令和鼠标操作，与 iOS 共享主要领域�
 
 | 路径 | 职责 |
 |---|---|
-| `Core/` | `CubicCore` Swift Package；领域模型、命令与查询、排期、模板、同步 journal、合并和 SQLite 缓存，以及 Core tests |
+| `Core/` | `CubicCore` Swift Package；领域模型、命令与查询、排期、模板、本地存储与目录同步（`WorkspaceStore`），以及 Core tests |
 | `CubicApp/` | 共享 SwiftUI 界面、`AppModel`、本地提交入口、日历、通知及同步 adapters；iOS App 入口 |
 | `CubicMac/` | Mac App 入口、资源与 sandbox entitlements |
 | `Cubic.xcodeproj/` | Xcode 工程、workspace 与 shared schemes |
@@ -55,15 +55,15 @@ Mac 版提供侧栏、键盘命令和鼠标操作，与 iOS 共享主要领域�
 | `project.yml` | XcodeGen 工程描述，修改工程配置时同步维护 |
 | `scripts/release.sh` | Mac Developer ID 与 iOS Ad Hoc 发布脚本 |
 
-界面通过 `AppModel` 发起领域操作，`WorkspaceSession` 校验编辑所依据的快照并提交到 `SyncJournal`。不可变 revisions 保存事实；SQLite 保存可重建的合法投影缓存。同步经 `SyncCoordinator` 和 transport 读取远端 revisions，再做确定性归并。冲突事实会保留，不能把非法投影当作精确排期依据。
+界面通过 `AppModel` 发起领域操作，`WorkspaceStore` 把工作空间和可同步的设置保存为一个 JSON 文件（`Documents/Cubic/workspace.json`）。连接同步目录后，它与目录中的 `Cubic.json` 交换修改：只有一端修改时直接采用；两端都修改时保留保存时间较新的版本，另一份写成目录中的 `Cubic-conflict-*.json`。基于旧版本准备的编辑会被拒绝，需重新查看后保存。
 
-`CalendarBridge` 负责系统日历关联与对账；EventKit I/O 与领域提交分开处理。系统权限、目录访问 bookmark、日历写入绑定等信息留在设备本地。备份中的事实恢复与偏好恢复分步进行，失败时应核对已完成部分。
+`CalendarBridge` 负责系统日历关联与对账；EventKit I/O 与领域提交分开处理。系统权限、目录访问 bookmark、日历写入绑定等信息留在设备本地。
 
 ## 开发环境与构建
 
 需要 macOS、完整 Xcode（26.3 或更新）和 XcodeGen。
 
-Core 没有远程 Swift package 依赖，通过系统 SQLite binding 访问 SQLite。
+Core 没有远程 Swift package 依赖。
 
 从仓库根目录重新生成工程：
 

@@ -54,20 +54,20 @@ extension Workspace {
             let previous = draft.history.last { event in
                 guard event.objectID == itemID, event.note == "cubic.baseline.correction.v1",
                       let data = event.detail?.data(using: .utf8),
-                      let correction = try? SyncCoding.decode(EstimateBaselineCorrection.self, from: data) else { return false }
+                      let correction = try? JSONCoding.decode(EstimateBaselineCorrection.self, from: data) else { return false }
                 return correction.baseline == baseline
             }
             let event = HistoryEvent(date: now, kind: .estimateCorrected, objectID: itemID, note: "cubic.baseline.correction.v1",
                                      minutes: minutes, previousMinutes: original, round: baseline == .preStart ? 1 : nil,
                                      correctsEventID: previous?.id ?? source?.id, changeReason: .correction,
-                                     detail: String(decoding: try SyncCoding.encode(correction), as: UTF8.self))
+                                     detail: String(decoding: try JSONCoding.encode(correction), as: UTF8.self))
             draft.history.append(event)
         }
     }
     public func baselineCorrections(itemID: String) -> [EstimateBaselineCorrection] {
         history.filter { $0.objectID == itemID && $0.note == "cubic.baseline.correction.v1" }.compactMap { event in
             guard let data = event.detail?.data(using: .utf8) else { return nil }
-            return try? SyncCoding.decode(EstimateBaselineCorrection.self, from: data)
+            return try? JSONCoding.decode(EstimateBaselineCorrection.self, from: data)
         }.sorted { $0.date < $1.date }
     }
     /// Moves the primary location without copying work or declaring its factual outcome invalid.

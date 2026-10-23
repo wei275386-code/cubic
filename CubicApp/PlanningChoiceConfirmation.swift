@@ -23,7 +23,7 @@ enum TrialConfirmationPolicy {
         var conditions: [PlanningCondition]
         var conflicts: [PlanningCertificate]
     }
-    private static func signature(_ result: PlanningTrialResult) throws -> SyncValue {
+    private static func signature(_ result: PlanningTrialResult) throws -> JSONValue {
         var source = result.source
         source.input.now = Date(timeIntervalSince1970: 0)
         source.input.revision = PlanningRevision(workspace: "", capacity: "", calendar: "", time: "")
@@ -34,10 +34,10 @@ enum TrialConfirmationPolicy {
             unallocatedMinutes: result.unallocatedMinutes, excessMinutes: result.excessMinutes,
             impacts: result.impacts, conditions: result.conditions, conflicts: result.unresolvedConflicts)
         let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .millisecondsSince1970
-        return normalized(try SyncCoding.decode(SyncValue.self, from: encoder.encode(context)))
+        return normalized(try JSONCoding.decode(JSONValue.self, from: encoder.encode(context)))
     }
     private static let displayDates: Set<String> = ["start", "end", "startPosition", "estimatedCompletion", "beforeDate", "afterDate", "windowStart", "windowEnd", "expectedAt", "requiredReadyAt", "latestAllowedAt", "latestStart", "latestFinish", "horizonEnd"]
-    private static func normalized(_ value: SyncValue, field: String = "", eventTimes: Bool = false) -> SyncValue {
+    private static func normalized(_ value: JSONValue, field: String = "", eventTimes: Bool = false) -> JSONValue {
         switch value {
         case .number(let number) where displayDates.contains(field) || eventTimes:
             return .number(floor(number / 60_000) * 60_000)
@@ -58,35 +58,30 @@ enum TrialConfirmationPolicy {
     }
 }
 
-private extension Dictionary where Key == String, Value == SyncValue {
-    func mapValuesWithKeys(_ transform: (String, SyncValue) -> SyncValue) -> [String: SyncValue] {
+private extension Dictionary where Key == String, Value == JSONValue {
+    func mapValuesWithKeys(_ transform: (String, JSONValue) -> JSONValue) -> [String: JSONValue] {
         reduce(into: [:]) { result, pair in result[pair.key] = transform(pair.key, pair.value) }
     }
 }
 
 /// One complete confirmation command, shared by production and operation tests.
-/// Input and display state remain in the View. Only in-flight and unsettled operation identities live here.
+/// Input and display state remain in the View. Only in-flight and completed presentation identities live here.
 @MainActor final class PlanningChoiceConfirmation {
     enum Outcome {
-        case confirmed(WorkspaceCommitOutcome)
+        case confirmed
         case redisplay(PlanningTrialResult)
-        case recoveryRequired(SyncLocalCommitFailure)
         case unavailable(String?)
     }
     private let calculate: @MainActor (PlanningTrialRequest) async -> PlanningTrialResult?
     private let sourceIsCurrent: @MainActor (PlanningTrialResult) -> Bool
-    private let commit: @MainActor (PlanningTrialResult, String) async throws -> WorkspaceCommitOutcome
-    private let recover: @MainActor (SyncLocalCommitReceipt) async throws -> WorkspaceCommitOutcome?
+    private let commit: @MainActor (PlanningTrialResult, String) async throws -> Void
     private var inFlight: Set<UUID> = []
-    private var unsettled: [UUID: SyncLocalCommitReceipt] = [:]
     private var completed: [UUID] = []
 
     init(calculate: @escaping @MainActor (PlanningTrialRequest) async -> PlanningTrialResult?,
          sourceIsCurrent: @escaping @MainActor (PlanningTrialResult) -> Bool,
-         commit: @escaping @MainActor (PlanningTrialResult, String) async throws -> WorkspaceCommitOutcome,
-         recover: @escaping @MainActor (SyncLocalCommitReceipt) async throws -> WorkspaceCommitOutcome?) {
-        self.calculate = calculate; self.sourceIsCurrent = sourceIsCurrent
-        self.commit = commit; self.recover = recover
+         commit: @escaping @MainActor (PlanningTrialResult, String) async throws -> Void) {
+        self.calculate = calculate; self.sourceIsCurrent = sourceIsCurrent; self.commit = commit
     }
 
     func confirm(presentationID: UUID, displayed: PlanningTrialResult, request: PlanningTrialRequest,
@@ -96,14 +91,6 @@ private extension Dictionary where Key == String, Value == SyncValue {
         inFlight.insert(presentationID)
         defer { inFlight.remove(presentationID) }
         do {
-            if let receipt = unsettled[presentationID] {
-                // Finish the original choice even if its journal was recovered by a background refresh.
-                guard let outcome = try await recover(receipt) else {
-                    unsettled[presentationID] = nil
-                    return .unavailable("已核实原选择未写入，请重新查看试算后确认。")
-                }
-                return settle(outcome, presentationID: presentationID)
-            }
             guard displayed.request == request else { return .unavailable("试算输入已变化，请查看新结果。") }
             guard let latest = await calculate(request) else { return .unavailable(nil) }
             guard !Task.isCancelled, isCurrent(), sourceIsCurrent(latest) else { return .unavailable(nil) }
@@ -112,22 +99,11 @@ private extension Dictionary where Key == String, Value == SyncValue {
             }.value
             guard !Task.isCancelled, isCurrent(), sourceIsCurrent(latest) else { return .unavailable(nil) }
             if changed { return .redisplay(latest) }
-            // Linearization boundary: after issuing this commit, cancellation cannot undo a durable fact.
-            let outcome = try await commit(latest, note)
-            return settle(outcome, presentationID: presentationID)
-        } catch { return .unavailable(error.localizedDescription) }
-    }
-
-    private func settle(_ outcome: WorkspaceCommitOutcome, presentationID: UUID) -> Outcome {
-        switch outcome {
-        case .committed:
-            unsettled[presentationID] = nil
+            // Linearization boundary: after issuing this commit, cancellation cannot undo a saved fact.
+            try await commit(latest, note)
             completed.append(presentationID)
             if completed.count > 64 { completed.removeFirst() }
-            return .confirmed(outcome)
-        case .recoveryRequired(let failure):
-            unsettled[presentationID] = failure.receipt
-            return .recoveryRequired(failure)
-        }
+            return .confirmed
+        } catch { return .unavailable(error.localizedDescription) }
     }
 }

@@ -7,12 +7,12 @@ struct HistoryFactDetails: View {
     private var data: Data? { event.detail?.data(using: .utf8) }
     var body: some View {
         if let data, event.note == RiskNoticeEngine.historyMarker,
-           let notice = try? SyncCoding.decode(RiskNotice.self, from: data) {
+           let notice = try? JSONCoding.decode(RiskNotice.self, from: data) {
             NoticeRow(notice: notice)
             Text(notice.isRead ? "已读" : "未读").font(.caption)
             NavigationLink("查看提醒当前状态") { NoticeDetailView(noticeID: notice.id) }
         } else if let data, event.note == "cubic.baseline.correction.v1",
-                  let correction = try? SyncCoding.decode(EstimateBaselineCorrection.self, from: data) {
+                  let correction = try? JSONCoding.decode(EstimateBaselineCorrection.self, from: data) {
             Text(correction.baseline == .initial ? "首次估计更正" : "开工前估计更正")
             Text("保留原值 \(minutesLabel(correction.originalMinutes)) → 更正为 \(minutesLabel(correction.correctedMinutes))")
             if !correction.reason.isEmpty { Text(correction.reason) }
@@ -20,7 +20,7 @@ struct HistoryFactDetails: View {
         } else if event.kind == .choiceRecorded,
                   let choice = model.workspace.choices?.first(where: { $0.id == event.objectID }) {
             NavigationLink("查看这次选择的记录") { ChoiceDetailView(choice: choice) }
-        } else if let data, let value = try? SyncCoding.decode(SyncValue.self, from: data),
+        } else if let data, let value = try? JSONCoding.decode(JSONValue.self, from: data),
                   case .object(let values) = value,
                   case .object(let before) = values["before"], case .object(let after) = values["after"] {
             let fields = Set(before.keys).union(after.keys).filter { $0 != "id" && before[$0] != after[$0] }.sorted()
@@ -40,7 +40,7 @@ struct HistoryFactDetails: View {
     static func fieldTitle(_ field: String) -> String {
         Self.titles[field] ?? "其他资料（\(field)）"
     }
-    private func describe(_ value: SyncValue, field: String) -> String {
+    private func describe(_ value: JSONValue, field: String) -> String {
         switch value {
         case .null: return "未记录"
         case .bool(let value): return value ? "是" : "否"
