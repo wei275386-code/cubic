@@ -44,7 +44,6 @@ extension SyncPhase {
 
 struct SyncSettingsSection: View {
     @Environment(AppModel.self) private var model
-    @State private var showingBinding = false
     @Binding var selectedDirectoryURL: URL?
     let onSelectDirectory: () -> Void
     @State private var inspection: FileSyncDirectoryInspection?
@@ -53,12 +52,8 @@ struct SyncSettingsSection: View {
     var body: some View {
         Section("Cubic 数据同步") {
             statusRows
-            if model.cloudKitLegacyBlocked {
-                Text(ReleaseCapabilities.cloudKitUnavailableMessage).font(.callout)
-                    .accessibilityIdentifier("sync.cloudkit.legacyBlocked")
-            }
             syncActions
-            Text("请选择 iCloud Drive 中同一个目录连接各设备。文件同步不要求 CloudKit 签名；其他文件提供商未经完整验证。离线修改先保存在本机，恢复后自动重试。")
+            Text("请选择 iCloud Drive 中同一个目录连接各设备。其他文件提供商未经完整验证。离线修改先保存在本机，恢复后自动重试。")
                 .font(.caption).foregroundStyle(.secondary)
             Text("工作时段、时区、日期例外、日历排期与提醒偏好随 Cubic 数据同步。日历和通知的系统权限需在各设备授权。")
                 .font(.caption).foregroundStyle(.secondary)
@@ -81,13 +76,6 @@ struct SyncSettingsSection: View {
             }
             Button("取消", role: .cancel) { inspection = nil }
         } message: { Text(directoryConfirmation) }
-        .confirmationDialog("连接 CloudKit 数据", isPresented: $showingBinding, titleVisibility: .visible) {
-            Button("使用此账号的 CloudKit 数据") { Task { await model.connectCloudAccount(importLocal: false) } }
-            Button("合并本机数据到 CloudKit") { Task { await model.connectCloudAccount(importLocal: true) } }
-            Button("取消", role: .cancel) { }
-        } message: {
-            Text("CloudKit 需要支持 iCloud capability 的签名。切换远端时旧 journal 保留，每个 workspace 同时只启用一种数据同步方式。")
-        }
     }
     private var directoryConfirmation: String {
         guard let inspection else { return "" }
@@ -130,9 +118,6 @@ struct SyncSettingsSection: View {
             if model.syncTransportLabel != "仅本机" {
                 Button("断开远端，保留本机数据") { Task { await model.disconnectRemoteSync() } }
                     .accessibilityIdentifier("sync.disconnect")
-            }
-            if ReleaseCapabilities.cloudKitEnabled {
-                Button("连接 CloudKit") { showingBinding = true }.accessibilityIdentifier("sync.bind")
             }
     }
     private func connect(importLocal: Bool) {

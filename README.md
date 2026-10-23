@@ -24,7 +24,7 @@ Mac 版提供侧栏、键盘命令和鼠标操作，与 iOS 共享主要领域�
 4. 需要跨设备时，在两端设置中选择同一个 iCloud Drive 同步目录，并等待文件完整下载。每台设备分别授予目录访问权限；不要复制另一台设备的目录 bookmark。
 5. 更换安装或迁移前，可从设置导出 JSON 备份。恢复按事实合并，可能产生需要人工处理的冲突。
 
-当前同步主路径是 iCloud Drive 文件目录，不要求 CloudKit capability。Release 禁用新的 CloudKit 连接；历史 CloudKit 数据的本机保留和导出，不代表未下载远端数据已完成迁移。
+同步通过 iCloud Drive 中的普通文件目录完成，不使用 CloudKit。
 
 ## 从 Markdown 创建项目
 

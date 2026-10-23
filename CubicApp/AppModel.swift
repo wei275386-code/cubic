@@ -133,7 +133,6 @@ extension AppBackup: Codable {
     private var currentEditorHost: UUID? { modalMessageHosts.last ?? messagePages.last }
     @ObservationIgnored private var writeWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
     private var syncJournal: SyncJournal?
-    private static let cloudContainerID = "iCloud.local.liwei.Cubic"
     nonisolated private static var syncWorkspaceID: String { workCalendarQAMode ? "cubic.work-calendar.qa" : "cubic.primary" }
     #if DEBUG
     @ObservationIgnored private var testingDefaults: UserDefaults?
@@ -148,8 +147,7 @@ extension AppBackup: Codable {
     }
     private var activeSyncPartition: String?
     private var activeSyncKind = "local"
-    var cloudKitLegacyBlocked: Bool { activeSyncKind == "cloudkit" && !ReleaseCapabilities.cloudKitEnabled }
-    var syncTransportLabel: String { activeSyncKind == "file" ? "文件目录同步" : activeSyncKind == "cloudkit" ? "CloudKit" : "仅本机" }
+    var syncTransportLabel: String { activeSyncKind == "file" ? "文件目录同步" : "仅本机" }
     var fileSyncConnection: FileSyncConnection? {
         guard let data = syncDefaults.data(forKey: "cubic.sync.fileConnection") else { return nil }
         return try? JSONDecoder().decode(FileSyncConnection.self, from: data)
@@ -983,12 +981,6 @@ extension AppBackup: Codable {
         return result.risks.map(\.message)
     }
     @discardableResult func prepareSync(accountID: String? = nil, importLocal: Bool = true, fileConnection: FileSyncConnection? = nil, transportKind: String? = nil) async -> Bool {
-        // A saved legacy binding may reopen its original partition, but explicit
-        // CloudKit association must fail before any journal/defaults mutation.
-        if transportKind == "cloudkit", !ReleaseCapabilities.cloudKitEnabled {
-            reportStatus(ReleaseCapabilities.cloudKitUnavailableMessage, context: messageContextVersion)
-            return false
-        }
         guard pendingLocalSave == nil else { statusMessage = "请先恢复原保存记录，再切换数据。"; return false }
         guard !saving else { statusMessage = "正在保存，请稍后再切换账号数据。"; return false }
         saving = true
@@ -1001,15 +993,10 @@ extension AppBackup: Codable {
             let defaults = syncDefaults
             let deviceID = defaults.string(forKey: "cubic.sync.deviceID") ?? UUID().uuidString
             defaults.set(deviceID, forKey: "cubic.sync.deviceID")
-            let kind = transportKind ?? defaults.string(forKey: "cubic.sync.transport") ?? (defaults.string(forKey: "cubic.sync.activeAccount") == nil ? "local" : "cloudkit")
+            let kind = transportKind ?? (defaults.string(forKey: "cubic.sync.transport") == "file" ? "file" : "local")
             let connection = fileConnection ?? self.fileSyncConnection
-            let account = kind == "file" ? connection?.metadata.remoteBinding.rawValue : (accountID ?? defaults.string(forKey: "cubic.sync.activeAccount"))
-            if kind == "cloudkit", !ReleaseCapabilities.cloudKitEnabled {
-                guard accountID == nil, let account, account == defaults.string(forKey: "cubic.sync.activeAccount") else {
-                    throw CoreError.invalid(ReleaseCapabilities.cloudKitUnavailableMessage)
-                }
-            }
-            let remoteEnabled = kind == "file" || (kind == "cloudkit" && ReleaseCapabilities.cloudKitEnabled)
+            let account = kind == "file" ? connection?.metadata.remoteBinding.rawValue : accountID
+            let remoteEnabled = kind == "file"
             if kind == "file", connection == nil { throw CoreError.invalid("同步目录授权不可用，请重新选择目录。") }
             let partition = account.map { SHA256.hash(data: Data($0.utf8)).map { String(format: "%02x", $0) }.joined() } ?? "local"
             if activeSyncPartition == partition, activeSyncKind == kind, fileConnection == nil, let cloudSync, let syncJournal {
@@ -1052,8 +1039,6 @@ extension AppBackup: Codable {
             let adapter: any SyncTransport
             if kind == "file", let connection {
                 adapter = FileProviderSyncTransport(access: SecurityScopedFileSyncAccess(connection: connection), workspaceID: Self.syncWorkspaceID, remoteBindingID: connection.metadata.remoteBinding, pageSize: 256)
-            } else if kind == "cloudkit", ReleaseCapabilities.cloudKitEnabled {
-                adapter = CloudSyncAdapter(containerID: Self.cloudContainerID, accountID: account ?? "unbound", workspaceID: Self.syncWorkspaceID)
             } else { adapter = LocalOnlySyncTransport() }
             let coordinator = SyncCoordinator(journal: journal, transport: adapter)
             // Migrate existing user settings once. Pull first so an existing remote setting wins over a local cache.
@@ -1097,7 +1082,6 @@ extension AppBackup: Codable {
             syncStorageError = nil
             serviceIssues["本机记录未能打开"] = nil
             serviceIssues["账号数据未能切换"] = nil
-            serviceIssues["CloudKit 发行支持边界"] = cloudKitLegacyBlocked ? ReleaseCapabilities.cloudKitUnavailableMessage : nil
             #if DEBUG
             if !isIntegrationTest, !Self.workCalendarQAMode || kind == "file" { controller.start() }
             #else
@@ -1190,24 +1174,6 @@ extension AppBackup: Codable {
         Task { await refresh() }
     }
     func refreshSync() async { await recoverPendingLocalSave(); await cloudSync?.refresh() }
-    func connectCloudAccount(importLocal: Bool) async {
-        let messageContext = messageContextVersion
-        guard ReleaseCapabilities.cloudKitEnabled else { reportStatus(ReleaseCapabilities.cloudKitUnavailableMessage, context: messageContext); return }
-        let probe = CloudSyncAdapter(containerID: Self.cloudContainerID, accountID: "probe", workspaceID: Self.syncWorkspaceID)
-        do {
-            switch try await probe.availability() {
-            case .requiresSigning: reportStatus("当前安装的版本暂不支持 CloudKit 同步，可以继续使用本机数据或选择 iCloud Drive 同步目录。", context: messageContext)
-            case .requiresAccount: reportStatus("请在系统设置检查 iCloud 登录状态和使用权限，再重试。", context: messageContext)
-            case .available(let account):
-                // Explicit partition switch; never bind an old account's journal to a new identity.
-                guard await prepareSync(accountID: account, importLocal: importLocal, transportKind: "cloudkit") else { return }
-                syncDefaults.set(account, forKey: "cubic.sync.activeAccount")
-                syncDefaults.set("cloudkit", forKey: "cubic.sync.transport")
-                await refreshSync()
-                if let projection = cloudSync?.projection { await applySyncProjection(projection) }
-            }
-        } catch { reportFailure("iCloud 未能连接", message: "暂时无法连接 iCloud，请稍后重试。", context: messageContext) }
-    }
     func inspectFileSyncDirectory(_ url: URL) async -> FileSyncDirectoryInspection? {
         do {
             return try await Task.detached(priority: .userInitiated) {

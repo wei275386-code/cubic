@@ -1,6 +1,5 @@
 import Foundation
 import Observation
-import CloudKit
 import Network
 import CubicCore
 #if canImport(UIKit)
@@ -28,18 +27,10 @@ import UIKit
     func start(intervalSeconds: TimeInterval = 60) {
         guard !retired else { return }
         stop()
-        // Local and Release-blocked legacy bindings need no polling or network monitor.
+        // Local-only storage needs no polling or network monitor.
         // Local writes and explicit refresh already publish journal status.
         guard remoteEnabled else { Task { await self.refresh() }; return }
         let interval = min(3600, max(30, intervalSeconds.isFinite ? intervalSeconds : 60))
-        observers.append(NotificationCenter.default.addObserver(forName: .CKAccountChanged, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                self.status.phase = .accountChanged
-                self.status.message = "iCloud 账号发生变化，原账号 journal 保留；正在核对独立 workspace。"
-                await self.refresh()
-            }
-        })
         observers.append(NotificationCenter.default.addObserver(forName: .cubicFileSyncDirectoryChanged, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -126,9 +117,6 @@ import UIKit
         Task { @MainActor [weak self] in await self?.refresh() }
         return current
     }
-    func bindAccount(_ accountID: String) async throws {
-        try await coordinator.bindAccount(accountID); await refresh()
-    }
     @discardableResult func record(workspace: Workspace, currentChoiceID: String?, expectedHeads: [String]? = nil) async throws -> SyncMergeResult {
         do {
             let value = try await coordinator.record(workspace: workspace, currentChoiceID: currentChoiceID, expectedHeads: expectedHeads)
@@ -188,10 +176,5 @@ import UIKit
         projection = value; status = await coordinator.status(); onMerge?(value)
         Task { @MainActor [weak self] in await self?.refresh() }
         return value
-    }
-    /// Route only this container's silent CloudKit notifications here. A push is a refresh hint, never a business fact.
-    func receivedRemoteNotification(_ userInfo: [AnyHashable: Any], containerID: String) async {
-        guard let notification = CKNotification(fromRemoteNotificationDictionary: userInfo), notification.containerIdentifier == containerID else { return }
-        await refresh()
     }
 }
