@@ -29,16 +29,37 @@ import CubicCore
         XCTAssertEqual(phone.workspace, base)
         XCTAssertEqual(phone.syncState.phase, .synced)
 
+        let placeholder = folder.appendingPathComponent(".Cubic.json.icloud")
+        try Data().write(to: placeholder)
         let saved = await mac.mutate { $0.items[0].name = "Renamed on Mac" }
         XCTAssertTrue(saved)
+        let phoneSaved = await phone.mutate { $0.items[1].name = "Renamed on Phone" }
+        XCTAssertTrue(phoneSaved)
         await mac.refreshSync()
         var settings = mac.preferences; settings.workWeekends = false
         let savedSettings = await mac.savePreferences(settings)
         XCTAssertTrue(savedSettings)
-        await mac.refreshSync()
-        await phone.refreshSync()
+        for _ in 0..<50 {
+            if mac.syncState.phase == .waiting && phone.syncState.phase == .waiting { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(mac.syncState.phase, .waiting)
+        XCTAssertEqual(phone.syncState.phase, .waiting)
+        XCTAssertEqual(mac.workspace.items.map(\.name), ["Renamed on Mac", "B"])
+        XCTAssertEqual(phone.workspace.items.map(\.name), ["A", "Renamed on Phone"])
+        try FileManager.default.removeItem(at: placeholder)
+        for _ in 0..<50 {
+            await mac.refreshSync()
+            await phone.refreshSync()
+            if mac.workspace == phone.workspace && !phone.preferences.workWeekends { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
         XCTAssertEqual(phone.workspace.items[0].name, "Renamed on Mac")
         XCTAssertFalse(phone.preferences.workWeekends)
+        await mac.refreshSync()
+        await phone.refreshSync()
+        XCTAssertEqual(mac.workspace, phone.workspace)
+        XCTAssertEqual(mac.workspace.items.map(\.name), ["Renamed on Mac", "Renamed on Phone"])
 
         await phone.disconnectSync()
         XCTAssertNil(phone.syncDirectoryLabel)
