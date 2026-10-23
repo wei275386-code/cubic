@@ -61,6 +61,8 @@ extension Workspace {
             case .blocker(let id): guard blockerIDs.contains(id) else { throw CoreError.missing("blocker: \(id)") } }
         }
         for project in projects {
+            let orders = nodes.filter { $0.projectID == project.id }.compactMap(\.structureOrder)
+            guard Set(orders).count == orders.count else { throw CoreError.invalid("同一项目的节点顺序不能重复") }
             guard (0...5).contains(project.importance) else { throw CoreError.invalid("importance 必须为 0...5") }
             try checkDeadline(project.deadline, zone: project.deadlineTimeZoneID, dateOnly: project.deadlineIsDateOnly)
             try checkMinutes(project.warningBufferMinutes, "warningBufferMinutes"); try checkDate(project.completedAt, "project.completedAt")

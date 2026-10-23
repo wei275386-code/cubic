@@ -71,7 +71,7 @@ import Testing
         #expect(try await phone.sync(folder: folder) == .unchanged)
     }
 
-    @Test(arguments: [true, false]) func concurrentEditsKeepNewestAndBackUpTheOther(macIsNewer: Bool) async throws {
+    @Test(arguments: [true, false]) func concurrentSameFieldEditsMergeAndBackUpTheOther(macIsNewer: Bool) async throws {
         let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
         let folder = root.appendingPathComponent("iCloud"); try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let mac = try WorkspaceStore(url: root.appendingPathComponent("mac.json"), deviceID: "mac")
@@ -85,15 +85,66 @@ import Testing
         let phoneEdit = try await phone.save(workspace: workspace("Phone edit"), now: phoneTime)
         #expect(try await phone.sync(folder: folder) == .uploaded)
         let outcome = try await mac.sync(folder: folder)
-        guard case .conflict(let keptThisDevice, let backupName) = outcome else { Issue.record("Expected a conflict, got \(outcome)"); return }
-        #expect(keptThisDevice == macIsNewer)
+        guard case .merged(let backupName?) = outcome else { Issue.record("Expected a merge with backup, got \(outcome)"); return }
         let winner = macIsNewer ? macEdit : phoneEdit, loser = macIsNewer ? phoneEdit : macEdit
-        #expect(await mac.document == winner)
-        #expect(try folderDocument(folder) == winner)
+        let merged = await mac.document
+        #expect(merged.workspace == winner.workspace)
+        #expect(merged.version != winner.version && merged.deviceID == "mac")
+        #expect(try folderDocument(folder) == merged)
         let backup = try JSONCoding.decode(WorkspaceDocument.self, from: Data(contentsOf: folder.appendingPathComponent(backupName)))
         #expect(backup == loser)
 
-        #expect(try await phone.sync(folder: folder) == (macIsNewer ? .downloaded : .unchanged))
+        #expect(try await phone.sync(folder: folder) == .downloaded)
+        #expect(await phone.document == merged)
+    }
+
+    @Test func concurrentDifferentEditsConvergeAfterReopening() async throws {
+        let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
+        let folder = root.appendingPathComponent("iCloud"); try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let macURL = root.appendingPathComponent("mac.json")
+        var mac = try WorkspaceStore(url: macURL, deviceID: "mac")
+        let phone = try WorkspaceStore(url: root.appendingPathComponent("phone.json"), deviceID: "phone")
+        let base = Workspace(items: [WorkItem(id: "a", name: "A", remainingMinutes: 30), WorkItem(id: "b", name: "B", remainingMinutes: 30)])
+        try await mac.save(workspace: base, preferences: ["base": .bool(true)])
+        _ = try await mac.connect(folder: folder, start: .useThisDevice)
+        _ = try await phone.connect(folder: folder, start: .useFolder)
+        mac = try WorkspaceStore(url: macURL, deviceID: "mac")
+        var mine = base, theirs = base
+        mine.items[0].name = "Mac"; theirs.items[1].name = "Phone"
+        try await mac.save(workspace: mine, preferences: ["base": .bool(true), "mac": .bool(true)])
+        try await phone.save(workspace: theirs, preferences: ["base": .bool(true), "phone": .bool(true)])
+        #expect(try await mac.sync(folder: folder) == .uploaded)
+        #expect(try await phone.sync(folder: folder) == .merged(backupName: nil))
+        #expect(try await mac.sync(folder: folder) == .downloaded)
+        let merged = await mac.document
+        #expect(await phone.document == merged)
+        #expect(merged.workspace.items.map(\.name) == ["Mac", "Phone"])
+        #expect(merged.preferences == ["base": .bool(true), "mac": .bool(true), "phone": .bool(true)])
+        #expect(try conflictCopies(folder).isEmpty)
+    }
+
+    @Test func invalidMergedReferencesFallBackToNewestWins() async throws {
+        let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
+        let folder = root.appendingPathComponent("iCloud"); try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let mac = try WorkspaceStore(url: root.appendingPathComponent("mac.json"), deviceID: "mac")
+        let phone = try WorkspaceStore(url: root.appendingPathComponent("phone.json"), deviceID: "phone")
+        let base = Workspace(items: [WorkItem(id: "a", name: "A", remainingMinutes: 30), WorkItem(id: "b", name: "B", remainingMinutes: 30)])
+        try await mac.save(workspace: base)
+        _ = try await mac.connect(folder: folder, start: .useThisDevice)
+        _ = try await phone.connect(folder: folder, start: .useFolder)
+        var mine = base, theirs = base
+        mine.items.removeFirst()
+        theirs.dependencies.append(Dependency(id: "dependency", source: .item("a"), targetItemID: "b"))
+        let winner = try await mac.save(workspace: mine, now: t0.addingTimeInterval(60))
+        let loser = try await phone.save(workspace: theirs, now: t0)
+        _ = try await phone.sync(folder: folder)
+        guard case .conflict(keptThisDevice: true, let name) = try await mac.sync(folder: folder) else {
+            Issue.record("Expected newest-wins fallback"); return
+        }
+        #expect(await mac.document == winner)
+        #expect(try folderDocument(folder) == winner)
+        #expect(try JSONCoding.decode(WorkspaceDocument.self, from: Data(contentsOf: folder.appendingPathComponent(name))) == loser)
+        _ = try await phone.sync(folder: folder)
         #expect(await phone.document == winner)
     }
 

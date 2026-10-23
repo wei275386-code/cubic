@@ -55,7 +55,7 @@ Mac 版提供侧栏、键盘命令和鼠标操作，与 iOS 共享主要领域�
 | `project.yml` | XcodeGen 工程描述，修改工程配置时同步维护 |
 | `scripts/release.sh` | Mac Developer ID 与 iOS Ad Hoc 发布脚本 |
 
-界面通过 `AppModel` 发起领域操作，`WorkspaceStore` 把工作空间和可同步的设置保存为一个 JSON 文件（`Documents/Cubic/workspace.json`）。连接同步目录后，它与目录中的 `Cubic.json` 交换修改：只有一端修改时直接采用；两端都修改时保留保存时间较新的版本，另一份写成目录中的 `Cubic-conflict-*.json`。基于旧版本准备的编辑会被拒绝，需重新查看后保存。
+界面通过 `AppModel` 发起领域操作，`WorkspaceStore` 把工作空间和可同步的设置保存为一个 JSON 文件（`Documents/Cubic/workspace.json`）。连接同步目录后，它与目录中的 `Cubic.json` 交换修改：只有一端修改时直接采用；两端都修改时基于共同版本合并；同一字段冲突时保留较新的值，另一份写成目录中的 `Cubic-conflict-*.json`。基于旧版本准备的编辑会被拒绝，需重新查看后保存。
 
 `CalendarBridge` 负责系统日历关联与对账；EventKit I/O 与领域提交分开处理。系统权限、目录访问 bookmark、日历写入绑定等信息留在设备本地。
 

@@ -837,12 +837,14 @@ import CubicCore
                 case .waitingForDownload:
                     syncState.phase = .waiting
                     continue
-                case .downloaded, .conflict(keptThisDevice: false, _):
+                case .downloaded, .merged, .conflict(keptThisDevice: false, _):
                     await publish(await store.document)
                 default: break
                 }
                 if case .conflict(_, let backupName) = outcome {
                     syncState.message = "两台设备都修改过数据，已保留较新的版本。另一份保存为同步目录中的 \(backupName)。"
+                } else if case .merged(let backupName?) = outcome {
+                    syncState.message = "两台设备的修改已合并。冲突的另一份保存为同步目录中的 \(backupName)。"
                 } else if syncState.phase == .failed {
                     syncState.message = nil
                 }

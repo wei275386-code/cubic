@@ -19,6 +19,7 @@ public enum FolderSyncOutcome: Sendable, Equatable {
     case unchanged
     case uploaded
     case downloaded
+    case merged(backupName: String?)
     /// Both devices changed the data. The newer copy won; the other one was saved in the folder as `backupName`.
     case conflict(keptThisDevice: Bool, backupName: String)
     /// iCloud has not finished downloading the folder's copy yet.
@@ -31,13 +32,14 @@ public enum FolderSyncStart: Sendable {
 }
 
 /// Owns the local workspace file and keeps it in step with `Cubic.json` in a sync folder.
-/// Conflicts resolve as "newest save wins"; the losing copy is kept next to it in the folder.
+/// Concurrent edits merge from the last agreed document; conflicting values prefer the newer save.
 public actor WorkspaceStore {
     public static let folderFilename = "Cubic.json"
     private struct LocalFile: Codable {
         var document: WorkspaceDocument
         /// Version both this device and the sync folder last agreed on; nil when not connected.
         var syncedVersion: String?
+        var base: WorkspaceDocument?
     }
     public nonisolated let url: URL
     public nonisolated let deviceID: String
@@ -106,6 +108,7 @@ public actor WorkspaceStore {
     public func disconnect() throws {
         var next = local
         next.syncedVersion = nil
+        next.base = nil
         try write(next)
     }
 
@@ -130,10 +133,31 @@ public actor WorkspaceStore {
         case (true, true):
             let mine = local.document
             let keepMine = (mine.savedAt, mine.deviceID) > (remote.savedAt, remote.deviceID)
+            if let merged = try? mergedDocument(mine, remote, preferLocal: keepMine) {
+                let name = merged.conflicted ? try backup(keepMine ? remote : mine, in: folder) : nil
+                var next = local; next.document = merged.document
+                try write(next)
+                try upload(to: folder)
+                return .merged(backupName: name)
+            }
             let name = try backup(keepMine ? remote : mine, in: folder)
             if keepMine { try upload(to: folder) } else { try adopt(remote) }
             return .conflict(keptThisDevice: keepMine, backupName: name)
         }
+    }
+
+    private func mergedDocument(_ mine: WorkspaceDocument, _ remote: WorkspaceDocument, preferLocal: Bool) throws -> (document: WorkspaceDocument, conflicted: Bool) {
+        guard let base = local.base else { throw CoreError.invalid("缺少共同版本") }
+        let workspace = WorkspaceMerge.merge(
+            base: try JSONCoding.decode(JSONValue.self, from: JSONCoding.encode(base.workspace)),
+            local: try JSONCoding.decode(JSONValue.self, from: JSONCoding.encode(mine.workspace)),
+            remote: try JSONCoding.decode(JSONValue.self, from: JSONCoding.encode(remote.workspace)), preferLocal: preferLocal)
+        let preferences = WorkspaceMerge.merge(base: .object(base.preferences), local: .object(mine.preferences),
+                                               remote: .object(remote.preferences), preferLocal: preferLocal)
+        let value = try JSONCoding.decode(Workspace.self, from: JSONCoding.encode(workspace.value))
+        try value.validate()
+        return (WorkspaceDocument(workspace: value, preferences: preferences.value.object!, deviceID: deviceID),
+                workspace.conflicted || preferences.conflicted)
     }
 
     private func write(_ next: LocalFile) throws {
@@ -143,10 +167,11 @@ public actor WorkspaceStore {
     private func markSynced(_ version: String) throws {
         var next = local
         next.syncedVersion = version
+        next.base = next.document
         try write(next)
     }
     private func adopt(_ remote: WorkspaceDocument) throws {
-        try write(LocalFile(document: remote, syncedVersion: remote.version))
+        try write(LocalFile(document: remote, syncedVersion: remote.version, base: remote))
     }
     private func upload(to folder: URL) throws {
         let data = try JSONCoding.encode(local.document)
@@ -188,7 +213,30 @@ public actor WorkspaceStore {
             }
         }
         if let coordinationError { throw coordinationError }
-        do { return try result!.get() }
+        do {
+            guard case .document(var remote) = try result!.get() else { return try result!.get() }
+            let versions = NSFileVersion.unresolvedConflictVersionsOfItem(at: file) ?? []
+            var handled: [NSFileVersion] = []
+            for version in versions {
+                guard let data = try? Data(contentsOf: version.url) else { continue }
+                if let other = try? JSONCoding.decode(WorkspaceDocument.self, from: data),
+                   (try? other.workspace.validate()) != nil {
+                    let keepRemote = (remote.savedAt, remote.deviceID) > (other.savedAt, other.deviceID)
+                    try backup(keepRemote ? other : remote, in: folder)
+                    if !keepRemote { remote = other }
+                } else {
+                    let copy = folder.appendingPathComponent("Cubic-conflict-\(UUID().uuidString).json")
+                    try coordinatedWrite(copy) { try data.write(to: $0, options: .atomic) }
+                }
+                handled.append(version)
+            }
+            if !handled.isEmpty {
+                let data = try JSONCoding.encode(remote)
+                try coordinatedWrite(file) { try data.write(to: $0, options: .atomic) }
+                for version in handled { version.isResolved = true; try? version.remove() }
+            }
+            return .document(remote)
+        }
         catch let error as CoreError { throw error }
         catch { throw CoreError.blocked("同步目录中的 Cubic.json 无法读取，本机数据未改变。") }
     }

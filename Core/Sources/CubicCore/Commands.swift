@@ -158,7 +158,7 @@ extension Workspace {
         let item = items[try itemIndex(itemID)]
         if let index = (workRounds ?? []).firstIndex(where: { $0.itemID == itemID && $0.round == item.currentRound }) { return index }
         var rounds = workRounds ?? []
-        rounds.append(WorkRound(itemID: itemID, round: item.currentRound, openedAt: item.started ?? now,
+        rounds.append(WorkRound(id: "\(itemID).round\(item.currentRound)", itemID: itemID, round: item.currentRound, openedAt: item.started ?? now,
                                 initialMinutes: item.currentRound == 1 ? item.initialMinutes : item.remainingMinutes,
                                 preStartMinutes: item.currentRound == 1 ? item.preStartMinutes : nil,
                                 startedAt: item.started, completedAt: item.completedAt))
@@ -385,7 +385,7 @@ extension Workspace {
         items[index].status = .pending; items[index].completedAt = nil
         items[index].needsReview = false; items[index].disposition = .active; items[index].startTimeIsUnknown = nil
         items[index].effortRecordingComplete = false
-        workRounds = (workRounds ?? []) + [WorkRound(itemID: id, round: items[index].currentRound, openedAt: now, initialMinutes: remainingMinutes)]
+        workRounds = (workRounds ?? []) + [WorkRound(id: "\(id).round\(items[index].currentRound)", itemID: id, round: items[index].currentRound, openedAt: now, initialMinutes: remainingMinutes)]
         try changeRemaining(itemID: id, minutes: remainingMinutes, now: now, reason: .rework, note: note)
         resetItemGates(id, now: now); invalidateDownstream(of: affectedSources(for: id), now: now)
         appendHistory(.reworked, id: id, now: now, note: note, minutes: remainingMinutes, round: items[index].currentRound)
@@ -414,7 +414,7 @@ extension Workspace {
     }
     mutating func storeBlockerRound(_ index: Int) {
         let value = blockers[index]
-        let snapshot = BlockerRound(blockerID: value.id, round: value.currentRound, triggeredAt: value.triggeredAt,
+        let snapshot = BlockerRound(id: "\(value.id).round\(value.currentRound)", blockerID: value.id, round: value.currentRound, triggeredAt: value.triggeredAt,
                                     expectedResolution: value.expectedResolution, expectedDurationMinutes: value.expectedDurationMinutes,
                                     followUpAt: value.followUpAt, resolvedAt: value.resolvedAt)
         var rounds = blockerRounds ?? []
