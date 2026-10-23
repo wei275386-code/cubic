@@ -53,7 +53,7 @@ Mac 版提供侧栏、键盘命令和鼠标操作，与 iOS 共享主要领域�
 | `Cubic.xcodeproj/` | Xcode 工程、workspace 与 shared schemes |
 | `Tests/App/`、`CubicUITests/`、`CubicMacUITests/` | App 单元测试及原生 UI 测试 |
 | `project.yml` | XcodeGen 工程描述，修改工程配置时同步维护 |
-| `scripts/`、`config/` | 测试入口、发布 CLI、toolchain lock 与非敏感配置模板 |
+| `scripts/release.sh` | Mac Developer ID 与 iOS Ad Hoc 发布脚本 |
 
 界面通过 `AppModel` 发起领域操作，`WorkspaceSession` 校验编辑所依据的快照并提交到 `SyncJournal`。不可变 revisions 保存事实；SQLite 保存可重建的合法投影缓存。同步经 `SyncCoordinator` 和 transport 读取远端 revisions，再做确定性归并。冲突事实会保留，不能把非法投影当作精确排期依据。
 
@@ -61,7 +61,7 @@ Mac 版提供侧栏、键盘命令和鼠标操作，与 iOS 共享主要领域�
 
 ## 开发环境与构建
 
-需要 macOS、完整 Xcode 和 XcodeGen。当前发布 toolchain lock 位于 `config/release-toolchain.json`，记录 Xcode 26.3、Swift 6.2.4、XcodeGen 2.46.0 和 XcodeBuildMCP 2.7.0；发布检查会核对具体 build、SDK 和工具版本。release CLI 使用 Python 3.9+。
+需要 macOS、完整 Xcode（26.3 或更新）和 XcodeGen。
 
 Core 没有远程 Swift package 依赖，通过系统 SQLite binding 访问 SQLite。
 
@@ -84,44 +84,29 @@ xcodebuildmcp device list --output json
 
 ## 测试
 
-从仓库根目录运行 Core tests 和发布工具 contract tests：
+从仓库根目录运行 Core tests：
 
 ```sh
 swift test --package-path Core
-python3 -B -m unittest discover -s scripts/release/tests -p 'test_*.py'
 ```
 
 `CubicArchitecture` scheme 编译实际 App sources 并运行 `Tests/App` 中的 macOS App tests。iOS / Mac UI tests 分别位于对应 UITests target。
 
-涉及真实 iCloud、系统权限和多阶段 UI 的测试可能要求 opt-in environment 或先前 checkpoint，具体条件在各测试源码中。Core 或模拟 I/O 的通过结果不能代替真实设备、系统日历和双设备同步验收；执行记录应注明 commit、设备、命令、失败与 skipped 场景。
+涉及真实 iCloud、系统权限和多阶段 UI 的测试可能要求 opt-in environment 或先前 checkpoint，具体条件在各测试源码中。Core 或模拟 I/O 的通过结果不能代替真实设备、系统日历和双设备同步验收。
 
-## 发布工具
+## 发布
 
-统一入口为 `scripts/release.sh`，也有 `release-preflight.sh`、`release-build.sh` 和 `release-package.sh` wrappers。查看可用参数：
+`scripts/release.sh` 用 `xcodebuild` 归档并导出到已忽略的 `release-output/`：
 
 ```sh
-./scripts/release.sh --help
-./scripts/release.sh preflight --help
-./scripts/release.sh build --help
-./scripts/release.sh package --help
+./scripts/release.sh mac          # Developer ID 签名的 Mac App，输出 Cubic.zip
+./scripts/release.sh ios-adhoc    # Ad Hoc iOS App，输出 Cubic.ipa
 ```
 
-将 `config/release.example.env` 复制为已忽略的 `config/release.local.env`，填写 commit、Team、Bundle ID、version/build 和签名输入后显式加载；CLI 不会自动读取该文件。不要提交真实 credentials、设备名单或 profiles。
-
-流程为：对 clean committed source 执行 `preflight` → 用 `build` 创建隔离 Release archive → 按 receipt 用 `package` 本地导出 → 对最终候选做安装、权限、同步、恢复和渠道验收。`--unsigned` 仅用于源码/编译检查，产物不能用于派发。
-
-Mac 渠道为 Developer ID，iOS 支持 TestFlight、App Store 和登记设备范围内的 Ad Hoc。签名需要合法的本机证书/private-key identity 和匹配 profiles；Mac notarization 由显式 `--notary` 触发。工具不会自动上传到 App Store Connect、注册设备或授予发行资格。
-
-<a id="release-validation"></a>
-
-### 候选验收记录
-
-每个候选需单独记录 commit、版本与 build、平台/架构、最终文件 SHA-256、签名/entitlements、安装和首次启动、权限拒绝与恢复、备份恢复、同步及冲突场景，并标明 pass、fail、blocked 或 not run。Mac 还需核对 notarization/stapling/Gatekeeper，iOS 需核对对应渠道的实际安装或 processing 结果。
-
-`package --acceptance-reference` 可指定该候选的实际记录位置。默认引用本节只是记录规范，不代表候选已通过；生成的 manifest 初始验收状态仍是 `not-run`，不能据此宣称正式可用。当前新 Mac/Intel、TestFlight 等完整发行组合仍缺少已完成的验收。
+使用自动签名，Team 默认取 `project.yml` 的 `DEVELOPMENT_TEAM`，可用 `CUBIC_TEAM_ID` 覆盖；`CUBIC_VERSION`、`CUBIC_BUILD` 覆盖版本号与 build。Mac 需要本机有 Developer ID Application 证书；设置 `CUBIC_NOTARY_PROFILE`（`xcrun notarytool store-credentials` 创建的 Keychain profile）后会公证并 staple。Ad Hoc 需要在 Apple Developer 账号中登记目标设备。
 
 ## 本地资料与 Git 范围
 
 `docs/` 是本地产品、架构、实施和 QA 历史资料，已被 Git 忽略，普通 checkout 不提供。`evidence`、`.scratch`、`.lody` 及 `.xcodebuildmcp/` 也是本地资料，不是构建依赖。已有兼容 symlink 的目标位于项目外；新开发者不需要创建这些 symlink。
 
-`.gitignore` 同时保留构建目录、Xcode 用户状态、Python bytecode、`release-output/` 和指定私有 release 输入的排除规则。本地备份、日志、签名材料和任意新增私有配置应放入明确忽略的位置；示例配置可以进入 Git。
+`.gitignore` 同时排除构建目录、Xcode 用户状态和 `release-output/`。本地备份、日志和签名材料应放入明确忽略的位置。
