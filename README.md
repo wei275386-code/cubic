@@ -51,7 +51,7 @@ Mac 版提供侧栏、键盘命令和鼠标操作，与 iOS 共享主要领域�
 | `CubicApp/` | 共享 SwiftUI 界面、`AppModel`、本地提交入口、日历、通知及同步 adapters；iOS App 入口 |
 | `CubicMac/` | Mac App 入口、资源与 sandbox entitlements |
 | `Cubic.xcodeproj/` | Xcode 工程、workspace 与 shared schemes |
-| `Tests/`、`CubicUITests/`、`CubicMacUITests/` | App、架构、通知及原生 UI 测试 |
+| `Tests/App/`、`CubicUITests/`、`CubicMacUITests/` | App 单元测试及原生 UI 测试 |
 | `project.yml` | XcodeGen 工程描述，修改工程配置时同步维护 |
 | `scripts/`、`config/` | 测试入口、发布 CLI、toolchain lock 与非敏感配置模板 |
 
@@ -61,7 +61,7 @@ Mac 版提供侧栏、键盘命令和鼠标操作，与 iOS 共享主要领域�
 
 ## 开发环境与构建
 
-需要 macOS、完整 Xcode 和 XcodeGen。当前发布 toolchain lock 位于 `config/release-toolchain.json`，记录 Xcode 26.3、Swift 6.2.4、XcodeGen 2.46.0 和 XcodeBuildMCP 2.7.0；发布检查会核对具体 build、SDK 和工具版本。release CLI 使用 Python 3.9+；部分测试脚本还需要提供 `timeout` 命令。
+需要 macOS、完整 Xcode 和 XcodeGen。当前发布 toolchain lock 位于 `config/release-toolchain.json`，记录 Xcode 26.3、Swift 6.2.4、XcodeGen 2.46.0 和 XcodeBuildMCP 2.7.0；发布检查会核对具体 build、SDK 和工具版本。release CLI 使用 Python 3.9+。
 
 Core 没有远程 Swift package 依赖，通过系统 SQLite binding 访问 SQLite。
 
@@ -91,7 +91,7 @@ swift test --package-path Core
 python3 -B -m unittest discover -s scripts/release/tests -p 'test_*.py'
 ```
 
-`CubicArchitecture` scheme 编译实际 App sources 并运行 macOS App tests；`scripts/test-architecture.sh`、`scripts/test-notifications.sh` 提供补充 Foundation harness。iOS / Mac UI tests 分别位于对应 UITests target。
+`CubicArchitecture` scheme 编译实际 App sources 并运行 `Tests/App` 中的 macOS App tests。iOS / Mac UI tests 分别位于对应 UITests target。
 
 涉及真实 iCloud、系统权限和多阶段 UI 的测试可能要求 opt-in environment 或先前 checkpoint，具体条件在各测试源码中。Core 或模拟 I/O 的通过结果不能代替真实设备、系统日历和双设备同步验收；执行记录应注明 commit、设备、命令、失败与 skipped 场景。
 

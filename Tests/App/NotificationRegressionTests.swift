@@ -1,4 +1,4 @@
-import Foundation
+import XCTest
 import CubicCore
 import UserNotifications
 
@@ -40,37 +40,32 @@ actor FakeNotificationCenter: ReminderNotificationCenter {
     func counts() -> (Int, Int, Int) { (additions, removals, maximumInFlight) }
 }
 
-@main @MainActor struct NotificationRegressionTests {
-    static var checks = 0
-    static func check(_ condition: Bool, _ message: String) {
-        checks += 1
-        precondition(condition, message)
-    }
-    static func notice(kind: String, date: Date?) -> RiskNotice {
+@MainActor final class NotificationRegressionTests: XCTestCase {
+    func notice(kind: String, date: Date?) -> RiskNotice {
         RiskNotice(id: kind, rootObjectID: "root", kind: kind, title: "标题", body: "内容",
                    projectIDs: [], itemIDs: [], createdAt: Date(), changedAt: Date(),
                    dueAt: date, fingerprint: "same")
     }
-    static func reminders(_ notices: [RiskNotice]) -> [FollowUpReminder] {
+    func reminders(_ notices: [RiskNotice]) -> [FollowUpReminder] {
         notices.compactMap { notice in
             notice.nextNotificationDate.map { FollowUpReminder(id: notice.id, title: notice.title, date: $0, noticeID: notice.id) }
         }
     }
-    static func main() async throws {
+    func testNotificationRegressions() async throws {
         let now = Date(), future = now.addingTimeInterval(3600), past = now.addingTimeInterval(-3600)
         for kind in ["capacityConflict", "projectRisk", "syncConflict", "review", "acceptanceFailed", "unlock"] {
             var old = notice(kind: kind, date: now.addingTimeInterval(2))
-            check(old.nextNotificationDate == nil, "Legacy immediate risks must stay in app: \(kind)")
+            XCTAssertTrue(old.nextNotificationDate == nil, "Legacy immediate risks must stay in app: \(kind)")
             old.isRead = true; old.snoozedUntil = future
-            check(old.nextNotificationDate == future, "An explicit snooze must work after acknowledgement")
+            XCTAssertTrue(old.nextNotificationDate == future, "An explicit snooze must work after acknowledgement")
             old.isResolved = true
-            check(old.nextNotificationDate == nil, "Resolved notices must not alert")
+            XCTAssertTrue(old.nextNotificationDate == nil, "Resolved notices must not alert")
         }
         var followUp = notice(kind: "followUp", date: future)
-        check(followUp.nextNotificationDate == future, "Future declared dates must survive")
+        XCTAssertTrue(followUp.nextNotificationDate == future, "Future declared dates must survive")
         followUp.isRead = true
-        check(followUp.nextNotificationDate == nil, "Read follow-ups must not alert")
-        check(ReminderSchedule.foregroundPresentation.isEmpty, "Foreground must be quiet")
+        XCTAssertTrue(followUp.nextNotificationDate == nil, "Read follow-ups must not alert")
+        XCTAssertTrue(ReminderSchedule.foregroundPresentation.isEmpty, "Foreground must be quiet")
 
         // Reproduce opening a workspace with fifteen overdue waits and fifteen reviews.
         var workspace = Workspace(
@@ -78,36 +73,36 @@ actor FakeNotificationCenter: ReminderNotificationCenter {
             blockers: (0..<15).map { Blocker(id: "wait\($0)", name: "等待\($0)", state: .active, expectedResolution: past, triggeredAt: past.addingTimeInterval(-3600), followUpAt: past) })
         let planning = try Engine.plan(workspace: workspace, input: PlanningInput(slots: [], now: now))
         let changes = RiskNoticeEngine.changes(workspace: workspace, planning: planning, now: now)
-        check(changes.filter { $0.kind == "review" }.count == 15, "In-app risks must remain visible")
-        check(changes.filter { $0.kind == "followUp" }.allSatisfy { $0.dueAt == past }, "Overdue dates must not be shifted to launch time")
-        check(ReminderSchedule.requests(reminders(changes), now: now).isEmpty, "Opening this workspace must schedule zero alerts")
+        XCTAssertTrue(changes.filter { $0.kind == "review" }.count == 15, "In-app risks must remain visible")
+        XCTAssertTrue(changes.filter { $0.kind == "followUp" }.allSatisfy { $0.dueAt == past }, "Overdue dates must not be shifted to launch time")
+        XCTAssertTrue(ReminderSchedule.requests(reminders(changes), now: now).isEmpty, "Opening this workspace must schedule zero alerts")
         for value in changes { workspace.history.append(try RiskNoticeEngine.event(value, at: now)) }
         let later = now.addingTimeInterval(60)
         let refreshed = try Engine.plan(workspace: workspace, input: PlanningInput(slots: [], now: later))
-        check(RiskNoticeEngine.changes(workspace: workspace, planning: refreshed, now: later).isEmpty, "Unchanged notices must not be regenerated")
+        XCTAssertTrue(RiskNoticeEngine.changes(workspace: workspace, planning: refreshed, now: later).isEmpty, "Unchanged notices must not be regenerated")
         var earlierReview = changes.first { $0.kind == "review" }!
         earlierReview.fingerprint = "previous-round"
         earlierReview.snoozedUntil = future
         workspace.history.append(try RiskNoticeEngine.event(earlierReview, at: later))
         let changedReview = RiskNoticeEngine.changes(workspace: workspace, planning: refreshed, now: later.addingTimeInterval(1))
             .first { $0.id == earlierReview.id }!
-        check(changedReview.nextNotificationDate == future, "Recalculated risk must preserve the user's explicit reminder")
+        XCTAssertTrue(changedReview.nextNotificationDate == future, "Recalculated risk must preserve the user's explicit reminder")
 
         var scheduledWorkspace = Workspace(blockers: [Blocker(id: "future", name: "未来等待", state: .active,
             expectedResolution: future, triggeredAt: past, followUpAt: future.addingTimeInterval(60))])
         let scheduledPlan = try Engine.plan(workspace: scheduledWorkspace, input: PlanningInput(slots: [], now: now))
         let scheduledChanges = RiskNoticeEngine.changes(workspace: scheduledWorkspace, planning: scheduledPlan, now: now)
-        check(scheduledChanges.count == 2 && reminders(scheduledChanges).count == 2, "Both declared future dates must remain schedulable")
+        XCTAssertTrue(scheduledChanges.count == 2 && reminders(scheduledChanges).count == 2, "Both declared future dates must remain schedulable")
         var snoozed = scheduledChanges.first { $0.kind == "followUp" }!
         snoozed.isRead = true
         scheduledWorkspace.history.append(try RiskNoticeEngine.event(snoozed, at: now))
         snoozed.snoozedUntil = future.addingTimeInterval(86400)
         scheduledWorkspace.history.append(try RiskNoticeEngine.event(snoozed, at: later))
         let restored = RiskNoticeEngine.stored(in: scheduledWorkspace)[0]
-        check(restored.nextNotificationDate == snoozed.snoozedUntil, "Persisted snooze must survive monotonic read acknowledgement")
+        XCTAssertTrue(restored.nextNotificationDate == snoozed.snoozedUntil, "Persisted snooze must survive monotonic read acknowledgement")
         snoozed.snoozedUntil = nil
         scheduledWorkspace.history.append(try RiskNoticeEngine.event(snoozed, at: later.addingTimeInterval(1)))
-        check(RiskNoticeEngine.stored(in: scheduledWorkspace)[0].nextNotificationDate == nil, "Marking read again must cancel a persisted snooze")
+        XCTAssertTrue(RiskNoticeEngine.stored(in: scheduledWorkspace)[0].nextNotificationDate == nil, "Marking read again must cancel a persisted snooze")
 
         var legacyTimedWorkspace = Workspace(blockers: [Blocker(id: "legacy-timed", name: "旧跟进", state: .active,
             triggeredAt: past.addingTimeInterval(-3600), followUpAt: past)])
@@ -116,19 +111,19 @@ actor FakeNotificationCenter: ReminderNotificationCenter {
         legacyTimed.dueAt = future
         legacyTimedWorkspace.history.append(try RiskNoticeEngine.event(legacyTimed, at: now))
         let repairedLegacy = RiskNoticeEngine.changes(workspace: legacyTimedWorkspace, planning: legacyTimedPlan, now: later)
-        check(repairedLegacy.count == 1 && repairedLegacy[0].dueAt == past, "Legacy timed notice must recover its real declared date")
-        check(ReminderSchedule.requests(reminders(repairedLegacy), now: later).isEmpty, "A legacy artificial future date must not alert")
+        XCTAssertTrue(repairedLegacy.count == 1 && repairedLegacy[0].dueAt == past, "Legacy timed notice must recover its real declared date")
+        XCTAssertTrue(ReminderSchedule.requests(reminders(repairedLegacy), now: later).isEmpty, "A legacy artificial future date must not alert")
 
         let next = FollowUpReminder(id: "next", title: "跟进", date: future, noticeID: "followup.next")
         let desired = ReminderSchedule.requests([next], now: now)
         let trigger = desired[0].trigger as! UNCalendarNotificationTrigger
-        check(!trigger.repeats && abs(trigger.nextTriggerDate()!.timeIntervalSince(future)) < 1, "Absolute trigger must fire at the requested instant")
-        check(trigger.nextTriggerDate()! >= future, "Second precision must never schedule before the declared date")
-        check(desired[0].content.userInfo["cubic.noticeID"] as? String == "followup.next", "Tapping must retain the detail route")
-        check(ReminderSchedule.matches(desired[0], ReminderSchedule.requests([next], now: later)[0]), "Refresh must produce the same request")
-        check(ReminderSchedule.requests([FollowUpReminder(id: "past", title: "过期", date: past)], now: now).isEmpty, "Never catch up overdue reminders")
+        XCTAssertTrue(!trigger.repeats && abs(trigger.nextTriggerDate()!.timeIntervalSince(future)) < 1, "Absolute trigger must fire at the requested instant")
+        XCTAssertTrue(trigger.nextTriggerDate()! >= future, "Second precision must never schedule before the declared date")
+        XCTAssertTrue(desired[0].content.userInfo["cubic.noticeID"] as? String == "followup.next", "Tapping must retain the detail route")
+        XCTAssertTrue(ReminderSchedule.matches(desired[0], ReminderSchedule.requests([next], now: later)[0]), "Refresh must produce the same request")
+        XCTAssertTrue(ReminderSchedule.requests([FollowUpReminder(id: "past", title: "过期", date: past)], now: now).isEmpty, "Never catch up overdue reminders")
         let many = (0..<70).map { FollowUpReminder(id: String(format: "%02d", $0), title: "跟进", date: future) }
-        check(ReminderSchedule.requests(many.reversed(), now: now).map(\.identifier) == (0..<50).map { String(format: "cubic.%02d", $0) }, "Capacity limit must keep a deterministic earliest fifty")
+        XCTAssertTrue(ReminderSchedule.requests(many.reversed(), now: now).map(\.identifier) == (0..<50).map { String(format: "cubic.%02d", $0) }, "Capacity limit must keep a deterministic earliest fifty")
 
         let center = FakeNotificationCenter(), service = ReminderService(center: center)
         let legacyContent = UNMutableNotificationContent(); legacyContent.body = "旧风险"
@@ -138,39 +133,43 @@ actor FakeNotificationCenter: ReminderNotificationCenter {
         await center.seed([legacy, unrelated].map { ImmutableNotificationRequest(request: $0) })
         try await service.replace([next])
         var counts = await center.counts()
-        check(counts.0 == 1 && counts.1 == 1, "Replace must remove legacy requests and add only the future reminder")
+        XCTAssertTrue(counts.0 == 1 && counts.1 == 1, "Replace must remove legacy requests and add only the future reminder")
         try await service.replace([next])
         counts = await center.counts()
-        check(counts.0 == 1 && counts.1 == 1, "Repeated refresh must do no SDK mutations")
+        XCTAssertTrue(counts.0 == 1 && counts.1 == 1, "Repeated refresh must do no SDK mutations")
         let changed = FollowUpReminder(id: "next", title: "已更新", date: future.addingTimeInterval(60), noticeID: "followup.next")
         try await service.replace([changed])
         counts = await center.counts()
-        check(counts.0 == 2 && counts.1 == 2, "Changed date must remove the old request before replacement")
+        XCTAssertTrue(counts.0 == 2 && counts.1 == 2, "Changed date must remove the old request before replacement")
         try await service.replace([])
         let remaining = await center.pendingRequests()
-        check(remaining.map { $0.request.identifier } == ["unrelated"], "Disable/read/resolve must cancel only Cubic requests")
+        XCTAssertTrue(remaining.map { $0.request.identifier } == ["unrelated"], "Disable/read/resolve must cancel only Cubic requests")
         await center.setAuthorized(false)
         await center.seed(desired.map { ImmutableNotificationRequest(request: $0) })
         try await service.replace([next])
-        check(await center.pendingRequests().map { $0.request.identifier } == ["unrelated"], "Revoked permission must cancel stale Cubic requests")
+        let condition1 = await center.pendingRequests().map { $0.request.identifier } == ["unrelated"]
+        XCTAssertTrue(condition1, "Revoked permission must cancel stale Cubic requests")
 
         await center.setAuthorized(true)
         await center.injectFailure()
-        do { try await service.replace([next]); preconditionFailure("Expected injected SDK error") }
+        do { try await service.replace([next]); XCTFail("Expected injected SDK error") }
         catch FakeNotificationCenter.Failure.injected { }
         try await service.replace([next])
-        check(await center.pendingRequests().contains { $0.request.identifier == "cubic.next" }, "Queue must recover after SDK failure")
+        let condition2 = await center.pendingRequests().contains { $0.request.identifier == "cubic.next" }
+        XCTAssertTrue(condition2, "Queue must recover after SDK failure")
         await center.injectFailure()
-        do { try await service.replace([changed]); preconditionFailure("Expected replacement error") }
+        do { try await service.replace([changed]); XCTFail("Expected replacement error") }
         catch FakeNotificationCenter.Failure.injected { }
-        check(await center.pendingRequests().allSatisfy { $0.request.identifier != "cubic.next" }, "A failed update must not keep an alert at the old date")
+        let condition3 = await center.pendingRequests().allSatisfy { $0.request.identifier != "cubic.next" }
+        XCTAssertTrue(condition3, "A failed update must not keep an alert at the old date")
         try await withThrowingTaskGroup(of: Void.self) { group in
             for _ in 0..<8 { group.addTask { try await service.replace([changed]) } }
             try await group.waitForAll()
         }
         counts = await center.counts()
-        check(counts.2 == 1, "Concurrent refreshes must never overlap SDK adds")
-        check(await center.pendingRequests().filter { $0.request.identifier.hasPrefix("cubic.") }.count == 1, "Concurrent refreshes must leave exactly one future request")
+        XCTAssertTrue(counts.2 == 1, "Concurrent refreshes must never overlap SDK adds")
+        let condition4 = await center.pendingRequests().filter { $0.request.identifier.hasPrefix("cubic.") }.count == 1
+        XCTAssertTrue(condition4, "Concurrent refreshes must leave exactly one future request")
 
         let delayedCenter = FakeNotificationCenter(), delayedService = ReminderService(center: delayedCenter)
         await delayedCenter.seed(desired.map { ImmutableNotificationRequest(request: $0) })
@@ -180,16 +179,19 @@ actor FakeNotificationCenter: ReminderNotificationCenter {
         try await disabling.value
         try await flush.value
         try await delayedService.replace([next])
-        check(await delayedCenter.pendingRequests().contains { $0.request.identifier == "cubic.next" }, "Re-enable must add after delayed deletion is confirmed")
+        let condition5 = await delayedCenter.pendingRequests().contains { $0.request.identifier == "cubic.next" }
+        XCTAssertTrue(condition5, "Re-enable must add after delayed deletion is confirmed")
 
         var removalTimedOut = false
         do { try await delayedService.replace([]) } catch { removalTimedOut = true }
-        check(removalTimedOut, "Unconfirmed deletion must fail within the bounded wait")
+        XCTAssertTrue(removalTimedOut, "Unconfirmed deletion must fail within the bounded wait")
         let issuedBeforeRetry = await delayedCenter.counts().1
         await delayedCenter.completeRemovals()
         try await delayedService.replace([next])
-        check(await delayedCenter.counts().1 == issuedBeforeRetry, "Retry must not issue a second delayed deletion")
-        check(await delayedCenter.pendingRequests().contains { $0.request.identifier == "cubic.next" }, "Retry must restore the future reminder after confirmation")
+        let condition6 = await delayedCenter.counts().1 == issuedBeforeRetry
+        XCTAssertTrue(condition6, "Retry must not issue a second delayed deletion")
+        let condition7 = await delayedCenter.pendingRequests().contains { $0.request.identifier == "cubic.next" }
+        XCTAssertTrue(condition7, "Retry must restore the future reminder after confirmation")
         let pastDeadline = now.addingTimeInterval(-4 * 86400)
         let slot = CapacitySlot(start: now, end: now.addingTimeInterval(8 * 3600))
         var archivedWorkspace = Workspace(
@@ -203,20 +205,19 @@ actor FakeNotificationCenter: ReminderNotificationCenter {
             ])
         let openPlan = try Engine.plan(workspace: archivedWorkspace, input: PlanningInput(slots: [slot], now: now))
         let opened = RiskNoticeEngine.changes(workspace: archivedWorkspace, planning: openPlan, now: now)
-        check(opened.contains { !$0.isResolved && $0.kind == "capacityConflict" && $0.projectIDs.contains("archived") }, "An active overdue project must still raise a reminder")
-        check(opened.contains { !$0.isResolved && $0.kind == "capacityConflict" && $0.projectIDs.contains("live") }, "A second overdue project must still raise a reminder")
+        XCTAssertTrue(opened.contains { !$0.isResolved && $0.kind == "capacityConflict" && $0.projectIDs.contains("archived") }, "An active overdue project must still raise a reminder")
+        XCTAssertTrue(opened.contains { !$0.isResolved && $0.kind == "capacityConflict" && $0.projectIDs.contains("live") }, "A second overdue project must still raise a reminder")
         for value in opened { archivedWorkspace.history.append(try RiskNoticeEngine.event(value, at: now)) }
         let archivedIndex = archivedWorkspace.projects.firstIndex { $0.id == "archived" }!
         archivedWorkspace.projects[archivedIndex].isArchived = true
         let hiddenPlan = try Engine.plan(workspace: archivedWorkspace, input: PlanningInput(slots: [slot], now: later))
         let hidden = RiskNoticeEngine.changes(workspace: archivedWorkspace, planning: hiddenPlan, now: later)
-        check(!hidden.contains { !$0.isResolved && $0.projectIDs.contains("archived") }, "Archived projects must not keep an overdue reminder")
-        check(hidden.contains { $0.isResolved && $0.projectIDs.contains("archived") }, "An existing reminder must close when its project is archived")
+        XCTAssertTrue(!hidden.contains { !$0.isResolved && $0.projectIDs.contains("archived") }, "Archived projects must not keep an overdue reminder")
+        XCTAssertTrue(hidden.contains { $0.isResolved && $0.projectIDs.contains("archived") }, "An existing reminder must close when its project is archived")
         var settled = archivedWorkspace
         for value in hidden { settled.history.append(try RiskNoticeEngine.event(value, at: later)) }
         let stored = RiskNoticeEngine.stored(in: settled)
-        check(!stored.contains { !$0.isResolved && $0.projectIDs.contains("archived") }, "Stored reminders must not list the archived project as open")
-        check(stored.contains { !$0.isResolved && $0.projectIDs.contains("live") }, "Archiving one project must leave the other project's reminder")
-        print("PASS: \(checks) notification regression checks")
+        XCTAssertTrue(!stored.contains { !$0.isResolved && $0.projectIDs.contains("archived") }, "Stored reminders must not list the archived project as open")
+        XCTAssertTrue(stored.contains { !$0.isResolved && $0.projectIDs.contains("live") }, "Archiving one project must leave the other project's reminder")
     }
 }
