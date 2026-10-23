@@ -88,7 +88,7 @@ struct ProjectHierarchyEditingTests {
         #expect(workspace.projectStructure(projectID: "p").membersByNode["n"]?.map(\.id) == ["a", "b", "c", "d"])
         #expect(workspace.dependencies.last?.source == .item("c"))
         #expect(workspace.dependencies.last?.targetItemID == "d")
-        let projected = try SyncDocument.workspace(SyncDocument(workspace, choice: nil).values)
+        let projected = try persistedCopy(workspace)
         #expect(projected.projectStructure(projectID: "p").membersByNode["n"]?.map(\.id) == ["a", "b", "c", "d"])
         #expect(projected.nodes.first?.sequentialDependenciesInitialized == true)
     }

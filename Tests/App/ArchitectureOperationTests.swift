@@ -74,65 +74,32 @@ actor FakeCalendarIO: CalendarBridgeIO {
 }
 
 @MainActor final class ConfirmationTestState {
-    var current: SyncMergeResult
+    var current: Workspace
     var latest: PlanningTrialResult
     var commits = 0
     var active = true
-    init(current: SyncMergeResult, latest: PlanningTrialResult) { self.current = current; self.latest = latest }
+    init(current: Workspace, latest: PlanningTrialResult) { self.current = current; self.latest = latest }
 }
 
 @MainActor final class ArchitectureOperationTests: XCTestCase {
     let now = Date()
     var base: Workspace { Workspace(items: [WorkItem(id: "a", name: "A", remainingMinutes: 60)]) }
-    func journal() throws -> SyncJournal {
-        try SyncJournal(directory: FileManager.default.temporaryDirectory.appendingPathComponent("architecture-\(UUID())"), workspaceID: "test", deviceID: "device")
-    }
-
-    func testSessionOperations() async throws {
-        let now = self.now
-        let j = try journal(), directory = await j.directory; defer { try? FileManager.default.removeItem(at: directory) }
-        let projection = try await j.bootstrap(workspace: base)
-        let session = WorkspaceSession(journal: j, cacheProjection: { _ in throw FakeCalendarIO.Failure.injected })
-        var edit = base; edit.items[0].name = "Changed"
-        let token = WorkspaceWriteToken(sessionID: session.id, heads: projection.heads)
-        let saved = try await session.submit(edit, basedOn: token, now: now)
-        guard case .committed(let result, let cacheIssue) = saved else { return XCTFail("cache failure denied commit") }
-        XCTAssertTrue(result.workspace.items[0].name == "Changed" && cacheIssue != nil, "cache failure preserves fact")
-        do { _ = try await session.submit(base, basedOn: token); XCTFail("stale heads accepted") } catch is CoreError {}
-        let other = WorkspaceSession(journal: j, cacheProjection: { _ in })
-        do { _ = try await other.submit(base, basedOn: token); XCTFail("foreign session accepted") } catch is CoreError {}
-        // Cache suspension is a real actor reentrancy boundary, not a sleep-based race.
-        let gate = TestGate(), serial = WorkspaceSession(journal: j, cacheProjection: { _ in await gate.hold() })
-        let current = try await j.snapshot()
-        var candidate = current.planningWorkspace; candidate.items[0].name = "Serialized"
-        let submission = Task { try await serial.submit(candidate, basedOn: .init(sessionID: serial.id, heads: current.heads)) }
-        await gate.waitUntilEntered()
-        do { _ = try await serial.submit(candidate, basedOn: .init(sessionID: serial.id, heads: current.heads)); XCTFail("parallel cache submit accepted") } catch is CoreError {}
-        await gate.release(); _ = try await submission.value
-        let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-        XCTAssertTrue(files.filter { $0.pathExtension == "revision" }.count == 3, "no duplicate operation")
-    }
 
     func testConfirmationOperations() async throws {
         let now = self.now
-        let j = try journal(), directory = await j.directory; defer { try? FileManager.default.removeItem(at: directory) }
-        let current = try await j.bootstrap(workspace: base)
-        let session = WorkspaceSession(journal: j, cacheProjection: { _ in })
         let input = PlanningInput(slots: [.init(start: now, end: now.addingTimeInterval(7200), energy: .normal)], now: now)
         let request = PlanningTrialRequest(itemID: "a", minutes: 30)
         let displayed = try Engine.trial(workspace: base, request: request, input: input)
-        let state = ConfirmationTestState(current: current, latest: displayed)
+        let state = ConfirmationTestState(current: base, latest: displayed)
         let operation = PlanningChoiceConfirmation(calculate: { _ in state.latest }, sourceIsCurrent: { _ in state.active }, commit: { result, note in
             state.commits += 1
-            var candidate = state.current.planningWorkspace
+            var candidate = state.current
             let scenario = result.scenario ?? result.baseline
             let trial = TrialResult(selections: [.init(itemID: "a", minutes: 30)], allocations: result.allocations, unallocatedMinutes: result.unallocatedMinutes ?? 0, snapshot: scenario.legacy, planning: result)
             try candidate.chooseNextAction(itemID: "a", now: now, trial: trial, dataVersion: "test", impactWasVerified: true, note: note)
-            candidate.history.append(HistoryEvent(date: now, kind: .choiceRecorded, objectID: candidate.currentChoiceID!, detail: String(decoding: try SyncCoding.encode(result), as: UTF8.self)))
-            let outcome = try await session.submit(candidate, basedOn: .init(sessionID: session.id, heads: state.current.heads))
-            if case .committed(let projection, _) = outcome { state.current = projection }
-            return outcome
-        }, recover: { receipt in try await session.recover(receipt) })
+            candidate.history.append(HistoryEvent(date: now, kind: .choiceRecorded, objectID: candidate.currentChoiceID!, detail: String(decoding: try JSONCoding.encode(result), as: UTF8.self)))
+            state.current = candidate
+        })
         // Different displayed minutes must redisplay the production operation without saving.
         state.latest = try Engine.trial(workspace: base, request: request, input: PlanningInput(slots: input.slots, now: now.addingTimeInterval(120)))
         let presentation = UUID()
@@ -141,9 +108,9 @@ actor FakeCalendarIO: CalendarBridgeIO {
         let refreshed = state.latest
         let confirmed = await operation.confirm(presentationID: presentation, displayed: refreshed, request: request, note: "reason", isCurrent: { true })
         guard case .confirmed = confirmed else { return XCTFail("complete confirmation failed") }
-        XCTAssertTrue((state.current.workspace.choices ?? []).count == 1, "one choice through real journal")
-        let evidence = state.current.workspace.history.first(where: { $0.detail != nil })!.detail!
-        XCTAssertTrue(try SyncCoding.decode(PlanningTrialResult.self, from: Data(evidence.utf8)) == refreshed, "precise latest source preserved")
+        XCTAssertTrue((state.current.choices ?? []).count == 1, "one choice recorded")
+        let evidence = state.current.history.first(where: { $0.detail != nil })!.detail!
+        XCTAssertTrue(try JSONCoding.decode(PlanningTrialResult.self, from: Data(evidence.utf8)) == refreshed, "precise latest source preserved")
         _ = await operation.confirm(presentationID: presentation, displayed: refreshed, request: request, note: "repeat", isCurrent: { true })
         XCTAssertTrue(state.commits == 1, "completed presentation dedup")
         state.active = false
@@ -154,23 +121,12 @@ actor FakeCalendarIO: CalendarBridgeIO {
         XCTAssertTrue(state.commits == 1, "departed presentation never saved")
         // Cancellation and duplicate requests while calculation is suspended.
         let gate = TestGate()
-        let suspended = PlanningChoiceConfirmation(calculate: { _ in await gate.hold(); return displayed }, sourceIsCurrent: { _ in true }, commit: { _, _ in state.commits += 1; return .committed(state.current, cacheIssue: nil) }, recover: { _ in nil })
+        let suspended = PlanningChoiceConfirmation(calculate: { _ in await gate.hold(); return displayed }, sourceIsCurrent: { _ in true }, commit: { _, _ in state.commits += 1 })
         let id = UUID(), task = Task { await suspended.confirm(presentationID: id, displayed: displayed, request: request, note: "", isCurrent: { true }) }
         await gate.waitUntilEntered()
         _ = await suspended.confirm(presentationID: id, displayed: displayed, request: request, note: "duplicate", isCurrent: { true })
         task.cancel(); await gate.release(); _ = await task.value
         XCTAssertTrue(state.commits == 1, "duplicate in-flight and pre-commit cancellation produce no choice")
-        // A failed manifest settles the same receipt, never recalculates/reissues the choice.
-        let manifest = directory.appendingPathComponent("manifest.json")
-        try FileManager.default.removeItem(at: manifest); try FileManager.default.createDirectory(at: manifest, withIntermediateDirectories: false)
-        let recoveryPresentation = UUID()
-        guard case .recoveryRequired = await operation.confirm(presentationID: recoveryPresentation, displayed: state.latest, request: request, note: "recovery", isCurrent: { true }) else { return XCTFail("partial choice not classified") }
-        XCTAssertTrue(state.commits == 2, "original choice submitted once")
-        try FileManager.default.removeItem(at: manifest)
-        guard case .confirmed = await operation.confirm(presentationID: recoveryPresentation, displayed: state.latest, request: request, note: "replay", isCurrent: { true }) else { return XCTFail("original choice not settled") }
-        XCTAssertTrue(state.commits == 2, "recovery never replays commit closure")
-        let condition1 = try await (j.snapshot().workspace.choices ?? []).count == 2
-        XCTAssertTrue(condition1, "exactly two distinct choices")
     }
 
     func bridge(_ state: CalendarTestState, io: FakeCalendarIO, defaults: UserDefaults,
@@ -223,32 +179,6 @@ actor FakeCalendarIO: CalendarBridgeIO {
         await b.refresh();
         let condition6 = await io.counts().events == 0
         XCTAssertTrue(condition6, "same-binding late write keeps cleanup receipt")
-        // Association + real journal manifest failure: retain original Event, pause writes, recover and mark it.
-        let j = try journal(), directory = await j.directory; defer { try? FileManager.default.removeItem(at: directory) }
-        _ = try await j.bootstrap(workspace: base)
-        let state2 = CalendarTestState(workspace: base, now: now), io2 = FakeCalendarIO()
-        let original = CalendarBridgeEvent(id: "original", title: "External", start: block.start, end: block.end, allDay: false, blockID: nil, busy: true, recurring: false)
-        await io2.seed(original)
-        var receipt: SyncLocalCommitReceipt?
-        let b2 = bridge(state2, io: io2, defaults: defaults, apply: { block, _, _ in
-            var candidate = state2.workspace
-            try candidate.setTimeBlock(block, slots: state2.slots, now: now)
-            do { _ = try await j.record(workspace: candidate, currentChoiceID: nil) }
-            catch let failure as SyncLocalCommitFailure { receipt = failure.receipt; state2.storageReady = false; throw failure }
-        })
-        try await b2.bind(calendarID: "one")
-        let manifest = directory.appendingPathComponent("manifest.json")
-        try FileManager.default.removeItem(at: manifest); try FileManager.default.createDirectory(at: manifest, withIntermediateDirectories: false)
-        do { try await b2.associate(eventID: "original", itemID: "a"); XCTFail("partial association hidden") } catch is SyncLocalCommitFailure { }
-        await b2.refresh();
-        let condition7 = await io2.counts().writes == 0
-        XCTAssertTrue(condition7, "unresolved association cannot reconcile")
-        try FileManager.default.removeItem(at: manifest)
-        guard case .committed(let recovered) = try await j.recoverLocalCommit(receipt!) else { return XCTFail("association recovery failed") }
-        state2.workspace = recovered.planningWorkspace; state2.storageReady = true; state2.version += 1
-        await b2.refresh()
-        let associated = await io2.allEvents()
-        XCTAssertTrue(associated.count == 1 && associated[0].id == "original" && associated[0].blockID != nil, "recovered association updates original Event")
         // Invalidation is terminal, including a write already issued to the SDK.
         let gate3 = TestGate(), io3 = FakeCalendarIO(), state3 = CalendarTestState(workspace: base, now: now)
         let b3 = bridge(state3, io: io3, defaults: defaults)

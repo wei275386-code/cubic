@@ -24,10 +24,6 @@ private enum TemplateFixture {
         try workspace.instantiateProjectTemplate(templateID: id, deadline: now.addingTimeInterval(172_800),
                                                  timeZoneID: "UTC", dateOnly: false, now: now.addingTimeInterval(10))
     }
-    static func revision(_ workspace: Workspace, old: Workspace? = nil, id: String, parents: [String] = []) throws -> SyncRevision {
-        try .recording(workspace: workspace, comparedTo: old, id: id, workspaceID: "templates", deviceID: id,
-                       parents: parents, createdAt: now)
-    }
     static func directory() throws -> URL {
         let result = FileManager.default.temporaryDirectory.appendingPathComponent("TemplateTests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: result, withIntermediateDirectories: true)
@@ -150,11 +146,10 @@ private enum TemplateFixture {
     #expect(shared.nodeID == nil)
     let aliases = (w.workLinks ?? []).filter { $0.projectID == copied && $0.source == .item(shared.id) }
     #expect(aliases.count == 2 && aliases.map(\.structureOrder) == [1, 2])
-    let revision = try TemplateFixture.revision(w, id: "stable-order")
-    let merged = try SyncMerge.merge(revisions: [revision], workspaceID: "templates")
-    #expect(merged.workspace.nodes.filter { $0.projectID == copied }.map(\.name) == ["First", "Second", "Empty"])
-    #expect(merged.workspace.items.filter { $0.nodeID == members.first { $0.name == "First work" }?.nodeID && $0.projectIDs == [copied] }.map(\.name) == ["First work", "Parallel work"])
-    #expect((merged.workspace.workLinks ?? []).filter { $0.projectID == copied }.map(\.structureOrder) == [1, 2, 3])
+    let stored = try persistedCopy(w)
+    #expect(stored.nodes.filter { $0.projectID == copied }.map(\.name) == ["First", "Second", "Empty"])
+    #expect(stored.items.filter { $0.nodeID == members.first { $0.name == "First work" }?.nodeID && $0.projectIDs == [copied] }.map(\.name) == ["First work", "Parallel work"])
+    #expect((stored.workLinks ?? []).filter { $0.projectID == copied }.map(\.structureOrder) == [1, 2, 3])
 }
 
 @Test func templateExclusionsNeverFlattenArchivedNodeMembersAndExternalRelationsBlockSave() throws {
@@ -264,26 +259,13 @@ private enum TemplateFixture {
     }
 }
 
-@Test func templateLegacyWorkspaceSQLiteBackupAndMalformedContentRoundTrip() throws {
+@Test func templateLegacyWorkspaceAndMalformedContentRoundTrip() throws {
     let decoder = JSONDecoder(), encoder = JSONEncoder()
     let legacy = try encoder.encode(TemplateFixture.base)
     let old = try decoder.decode(Workspace.self, from: legacy)
     #expect(old.projectTemplates == nil)
-    var w = old; let id = try TemplateFixture.save(&w)
-    let directory = try TemplateFixture.directory(); defer { try? FileManager.default.removeItem(at: directory) }
-    let repository = try SQLiteWorkspaceRepository(url: directory.appendingPathComponent("templates.sqlite"))
-    try repository.save(w)
-    #expect(try repository.load() == w)
-    let backup = try repository.backup()
-    let readOnlyCopy = directory.appendingPathComponent("backup-copy.sqlite")
-    try FileManager.default.copyItem(at: backup, to: readOnlyCopy)
-    #expect(try SQLiteWorkspaceRepository(url: readOnlyCopy).load() == w)
-    let export = directory.appendingPathComponent("export.json"); try repository.export(to: export)
-    let imported = try SQLiteWorkspaceRepository(url: directory.appendingPathComponent("import.sqlite"))
-    #expect(try imported.importWorkspace(from: export) == w)
-    var omitted = w; omitted.projectTemplates = nil
-    try repository.save(omitted)
-    #expect(try repository.load().projectTemplate(id: id)?.payload == w.projectTemplate(id: id)?.payload)
+    var w = old; _ = try TemplateFixture.save(&w)
+    #expect(try persistedCopy(w) == w)
     var root = try #require(JSONSerialization.jsonObject(with: try encoder.encode(w)) as? [String: Any])
     var rows = try #require(root["projectTemplates"] as? [[String: Any]])
     rows[0]["payload"] = ["unrecognized": "content", "items": ["bad"]]; root["projectTemplates"] = rows
@@ -293,64 +275,6 @@ private enum TemplateFixture {
     let preserved = try #require(JSONSerialization.jsonObject(with: try encoder.encode(corrupt)) as? [String: Any])
     let preservedRows = try #require(preserved["projectTemplates"] as? [[String: Any]])
     #expect((preservedRows[0]["payload"] as? [String: Any])?["unrecognized"] as? String == "content")
-}
-
-@Test func templateSyncMetadataIsIndependentContentAtomicAndOfflineDeleteRetained() async throws {
-    var w = TemplateFixture.base; let id = try TemplateFixture.save(&w)
-    let root = try TemplateFixture.revision(w, id: "root")
-    #expect(root.changes.filter { $0.path.collection == "projectTemplates" && $0.path.field == "@templateContent" }.count == 1)
-    #expect(!root.changes.contains { $0.path.collection == "projectTemplates" && $0.path.field == "items" })
-    var renamed = w, deleted = w
-    try renamed.renameProjectTemplate(templateID: id, title: "New title", now: TemplateFixture.now)
-    try deleted.deleteProjectTemplate(templateID: id, now: TemplateFixture.now)
-    let rename = try TemplateFixture.revision(renamed, old: w, id: "rename", parents: ["root"])
-    let deletion = try TemplateFixture.revision(deleted, old: w, id: "delete", parents: ["root"])
-    #expect(!rename.changes.contains { $0.path.field == "@templateContent" })
-    #expect(!deletion.changes.contains { $0.path.field == "@templateContent" })
-    let merge = try SyncMerge.merge(revisions: [deletion, root, rename], workspaceID: "templates")
-    let template = try #require(merge.workspace.projectTemplate(id: id))
-    #expect(template.title == "New title" && template.isRemoved && !template.canInstantiate)
-    #expect(template.payload == w.projectTemplate(id: id)?.payload)
-    #expect(merge.planningIsValid && merge.pausedItemIDs.isEmpty)
-    let dir = try TemplateFixture.directory(); defer { try? FileManager.default.removeItem(at: dir) }
-    let journal = try SyncJournal(directory: dir, workspaceID: "templates", deviceID: "offline")
-    _ = try await journal.bootstrap(workspace: w)
-    _ = try await journal.record(workspace: renamed, currentChoiceID: nil)
-    let pending = await journal.pending(limit: 20)
-    #expect(pending.count == 2)
-    let snapshot = try await journal.snapshot()
-    #expect(snapshot.workspace.projectTemplate(id: id)?.title == "New title")
-    let archive = try await journal.exportArchive()
-    let restoreDir = try TemplateFixture.directory(); defer { try? FileManager.default.removeItem(at: restoreDir) }
-    let restored = try SyncJournal(directory: restoreDir, workspaceID: "templates", deviceID: "restore")
-    let result = try await restored.restoreArchive(archive)
-    #expect(result.workspace.projectTemplate(id: id)?.payload == template.payload)
-    var omitted = renamed; omitted.projectTemplates = nil
-    _ = try await journal.record(workspace: omitted, currentChoiceID: nil)
-    #expect(try await journal.snapshot().workspace.projectTemplate(id: id)?.payload == template.payload)
-}
-
-@Test func templateSyncContentConflictAndPartialPayloadNeverInvalidateRuntimePlanning() throws {
-    var w = TemplateFixture.base; let id = try TemplateFixture.save(&w)
-    let root = try TemplateFixture.revision(w, id: "root")
-    let path = SyncPath(collection: "projectTemplates", entityID: id, field: "@templateContent")
-    let original = try #require(root.changes.first { $0.path == path }?.value)
-    let left = SyncRevision(id: "left", workspaceID: "templates", deviceID: "left", parents: ["root"], createdAt: TemplateFixture.now,
-                            changes: [.init(path: path, value: .object(["payload": .object(["broken": .string("kept")])]))])
-    let right = SyncRevision(id: "right", workspaceID: "templates", deviceID: "right", parents: ["root"], createdAt: TemplateFixture.now,
-                             changes: [.init(path: path, value: original)])
-    let merged = try SyncMerge.merge(revisions: [root, right, left], workspaceID: "templates")
-    #expect(merged.planningIsValid && merged.pausedItemIDs.isEmpty)
-    #expect(merged.conflicts.contains { $0.paths.contains(path) })
-    #expect(merged.workspace.projectTemplate(id: id)?.canInstantiate == false)
-    var candidate = merged.workspace; let before = candidate
-    #expect(throws: CoreError.self) { try TemplateFixture.instantiate(&candidate, id) }
-    #expect(candidate == before)
-    let partialID = "partial"
-    let partial = SyncRevision(id: "partial-root", workspaceID: "templates", deviceID: "wire", parents: [], createdAt: TemplateFixture.now,
-                              changes: [.init(path: .init(collection: "projectTemplates", entityID: partialID, field: "@exists"), value: .bool(true))])
-    let result = try SyncMerge.merge(revisions: [partial], workspaceID: "templates")
-    #expect(result.planningIsValid && result.workspace.projectTemplate(id: partialID)?.canInstantiate == false)
 }
 
 @Test func templateLargeSnapshotAndCreationScaleWithoutRepeatedGlobalScans() throws {
@@ -390,7 +314,7 @@ private enum TemplateFixture {
     #expect(w.previewProjectTemplate(projectID: "p").errors.contains { $0.code == .externalDependency })
 }
 
-@Test func templateArchiveLifecycleAndConflictQuarantinePersistWithoutSyntheticSyncEdits() throws {
+@Test func templateArchiveLifecycleAndQuarantinePersist() throws {
     var w = TemplateFixture.base
     let id = try TemplateFixture.save(&w)
     try w.archiveProjectTemplate(templateID: id, now: TemplateFixture.now)
@@ -400,10 +324,8 @@ private enum TemplateFixture {
     #expect(throws: CoreError.self) { try TemplateFixture.instantiate(&w, id) }
     try w.archiveProjectTemplate(templateID: id, isArchived: false, now: TemplateFixture.now.addingTimeInterval(1))
     #expect(w.projectTemplate(id: id)?.canInstantiate == true)
-    let original = try SyncDocument(w, choice: nil)
     w.projectTemplates?[0].availabilityIssue = "Unresolved content conflict"
     let roundTrip = try JSONDecoder().decode(Workspace.self, from: JSONEncoder().encode(w))
     #expect(roundTrip.projectTemplate(id: id)?.canInstantiate == false)
     #expect(roundTrip.projectTemplate(id: id)?.availabilityIssue == "Unresolved content conflict")
-    #expect(SyncDocument.changes(from: original, to: try SyncDocument(roundTrip, choice: nil)).isEmpty)
 }

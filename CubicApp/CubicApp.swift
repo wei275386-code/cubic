@@ -15,11 +15,11 @@ import UserNotifications
                 }
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .active && !model.loading {
-                        model.cloudSync?.start()
+                        model.startSync()
                         model.calendarBridge?.start()
-                        Task { await model.refresh(background: true); await model.refreshSync() }
+                        Task { await model.refresh(background: true) }
                     } else if phase == .background {
-                        model.cloudSync?.stop()
+                        model.stopSync()
                         model.calendarBridge?.stop()
                     }
                 }
@@ -84,7 +84,7 @@ struct RootView: View {
                 .background(.regularMaterial)
                 .accessibilityIdentifier("serviceIssue.openSettings")
             } else if !model.loading, model.loadFailure == nil, model.activeModalCount == 0,
-                      model.syncTransportLabel == "仅本机", model.workspace == .empty {
+                      model.syncDirectoryLabel == nil, model.workspace == .empty {
                 WorkspaceStartOptions { route in startupRoute = route; settings = true }
             }
         }

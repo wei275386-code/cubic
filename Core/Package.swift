@@ -6,8 +6,7 @@ let package = Package(
     platforms: [.iOS("26.0"), .macOS(.v14)],
     products: [.library(name: "CubicCore", targets: ["CubicCore"])],
     targets: [
-        .systemLibrary(name: "CSQLite3", pkgConfig: "sqlite3"),
-        .target(name: "CubicCore", dependencies: ["CSQLite3"]),
-        .testTarget(name: "CubicCoreTests", dependencies: ["CubicCore", "CSQLite3"])
+        .target(name: "CubicCore"),
+        .testTarget(name: "CubicCoreTests", dependencies: ["CubicCore"])
     ]
 )

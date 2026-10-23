@@ -50,23 +50,12 @@ import Testing
             let encodeStart = clock.now
             let bytes = try JSONEncoder().encode(w)
             let encodeMS = ms(encodeStart)
-            progress("sync", count, sample)
-            let syncStart = clock.now
-            let revision = try SyncRevision.recording(workspace: w, comparedTo: nil, workspaceID: "independent-scale", deviceID: "qa", parents: [], createdAt: now)
-            let syncMS = ms(syncStart)
-            #expect(!revision.changes.isEmpty)
-            let dir = FileManager.default.temporaryDirectory.appendingPathComponent("TemplateIndependentQA-\(UUID().uuidString)")
-            defer { try? FileManager.default.removeItem(at: dir) }
-            let repo = try SQLiteWorkspaceRepository(url: dir.appendingPathComponent("qa.sqlite"))
-            progress("sqlite", count, sample)
+            progress("storage", count, sample)
             let persistStart = clock.now
-            try repo.save(w)
-            let stored = try repo.load()
-            let canonical = JSONEncoder(); canonical.dateEncodingStrategy = .millisecondsSince1970; canonical.outputFormatting = [.sortedKeys]
-            #expect(try canonical.encode(stored) == canonical.encode(w))
+            let stored = try persistedCopy(w)
             #expect(stored.items == w.items && stored.projectTemplates == w.projectTemplates)
             let persistMS = ms(persistStart)
-            print(String(format: "TEMPLATE_INDEPENDENT_PERF mode=debug/macOS works=%d unrelated=2000 sample=%d preview_ms=%.3f save_ms=%.3f create_ms=%.3f app_boundary_ms=%.3f encode_ms=%.3f sync_ms=%.3f sqlite_save_load_ms=%.3f bytes=%d", count, sample, previewMS, saveMS, createMS, boundaryMS, encodeMS, syncMS, persistMS, bytes.count))
+            print(String(format: "TEMPLATE_INDEPENDENT_PERF mode=debug/macOS works=%d unrelated=2000 sample=%d preview_ms=%.3f save_ms=%.3f create_ms=%.3f app_boundary_ms=%.3f encode_ms=%.3f storage_ms=%.3f bytes=%d", count, sample, previewMS, saveMS, createMS, boundaryMS, encodeMS, persistMS, bytes.count))
         }
     }
 }
@@ -89,20 +78,17 @@ import Testing
     print("TEMPLATE_ACCEPTANCE_PROBE source_candidates=\(w.acceptances[0].candidateBlockerIDs ?? []) preview_blockers=\(preview.payload?.blockers.count ?? -1) copied_candidates=\(acceptance.candidateBlockerIDs ?? [])")
 }
 
-@Test func independentDateOnlySQLiteRoundTripDiagnostic() throws {
+@Test func independentDateOnlyStorageRoundTripDiagnostic() throws {
     let now = Date(timeIntervalSince1970: 1_800_000_000)
     var w = Workspace(projects: [Project(id: "p", name: "Precision")], items: [WorkItem(id: "i", name: "Work", projectIDs: ["p"], remainingMinutes: 2)])
     let id = try w.saveProjectTemplate(projectID: "p", title: "Precision", now: now)
     let created = try w.instantiateProjectTemplate(templateID: id, deadline: now, timeZoneID: "Asia/Singapore", dateOnly: true, now: now)
-    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("TemplatePrecisionQA-\(UUID().uuidString)")
-    defer { try? FileManager.default.removeItem(at: dir) }
-    let repo = try SQLiteWorkspaceRepository(url: dir.appendingPathComponent("qa.sqlite"))
-    try repo.save(w); let loaded = try repo.load()
+    let loaded = try persistedCopy(w)
     let a = try #require(w.projects.first { $0.id == created }?.deadline)
     let b = try #require(loaded.projects.first { $0.id == created }?.deadline)
     let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .millisecondsSince1970; encoder.outputFormatting = [.sortedKeys]
     let originalJSON = try encoder.encode(w), loadedJSON = try encoder.encode(loaded)
-    print("TEMPLATE_SQLITE_PRECISION exact_equal=\(loaded == w) canonical_json_equal=\(originalJSON == loadedJSON) deadline_delta_seconds=\(b.timeIntervalSince(a)) templates_equal=\(loaded.projectTemplates == w.projectTemplates) items_equal=\(loaded.items == w.items) history_equal=\(loaded.history == w.history)")
+    print("TEMPLATE_STORAGE_PRECISION exact_equal=\(loaded == w) canonical_json_equal=\(originalJSON == loadedJSON) deadline_delta_seconds=\(b.timeIntervalSince(a)) templates_equal=\(loaded.projectTemplates == w.projectTemplates) items_equal=\(loaded.items == w.items) history_equal=\(loaded.history == w.history)")
     #expect(originalJSON == loadedJSON)
     #expect(abs(b.timeIntervalSince(a)) < 0.001)
     #expect(loaded.items == w.items && loaded.projectTemplates == w.projectTemplates)

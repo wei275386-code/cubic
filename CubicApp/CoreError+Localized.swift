@@ -27,22 +27,6 @@ extension CoreError: @retroactive LocalizedError {
     }
 }
 
-extension SyncError: @retroactive LocalizedError {
-    public var errorDescription: String? {
-        switch self {
-        case .staleConflict: return "冲突内容已变化，请返回列表查看最新版本。"
-        case .accountChanged: return "iCloud 账号已变化，请到设置选择此账号使用的数据。"
-        case .requiresSigning: return "当前安装的版本暂不支持 iCloud 同步，可以继续使用本机数据。"
-        case .accountUnavailable: return "暂时无法使用 iCloud，请检查系统登录状态和使用权限。"
-        case .transport: return "暂时无法完成 iCloud 同步，请稍后重试。"
-        case .persistence: return "暂时无法保存同步数据，请稍后重试。"
-        case .unresolvedEdit: return "这项内容还有同步冲突，请先选择要使用的版本。"
-        case .missingParent: return "部分同步记录还没下载完整，请重新同步。"
-        case .invalidJournal, .identityCollision, .wrongWorkspace: return "这份同步数据无法合并，请检查备份或重新同步。"
-        }
-    }
-}
-
 private enum CoreErrorCopy {
     static func invalid(_ message: String) -> String {
         let messages = [

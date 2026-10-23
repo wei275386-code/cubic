@@ -169,12 +169,12 @@ struct ChoiceDetailView: View {
     private var originalPlanning: PlanningTrialResult? {
         guard let detail = model.workspace.history.last(where: { $0.objectID == choice.id && $0.detail?.hasPrefix("{") == true })?.detail,
               let data = detail.data(using: .utf8) else { return nil }
-        return try? SyncCoding.decode(PlanningTrialResult.self, from: data)
+        return try? JSONCoding.decode(PlanningTrialResult.self, from: data)
     }
     private var originalContext: ChoiceContext? {
         guard let detail = model.workspace.history.last(where: { $0.objectID == choice.id && $0.detail?.hasPrefix("{") == true })?.detail,
               let data = detail.data(using: .utf8) else { return nil }
-        return try? SyncCoding.decode(ChoiceContext.self, from: data)
+        return try? JSONCoding.decode(ChoiceContext.self, from: data)
     }
     var body: some View {
         let capturedTrial = originalPlanning

@@ -34,62 +34,22 @@ private func qaDate(_ minutes: Int) -> Date { qaNow.addingTimeInterval(Double(mi
     #expect(result.feasibility == .infeasible)
 }
 
-@Test func qaScale1000AndBackupGrowth() throws {
+@Test func qaScale1000AndStorage() throws {
     let workspace = Workspace(projects: [Project(id: "p", name: "Scale", deadline: qaDate(1000), planningCompleteness: .complete)], items: (0..<1000).map { WorkItem(id: "item-\($0)", name: "Task \($0)", projectIDs: ["p"], remainingMinutes: 1) })
     let start = Date()
     let result = try Engine.evaluate(workspace: workspace, slots: [CapacitySlot(start: qaNow, end: qaDate(1000))], now: qaNow)
     print("QA SCALE items=1000 evaluate_seconds=\(Date().timeIntervalSince(start))")
     #expect(result.feasibility == .feasible)
     #expect(result.availableActions.count == 1000)
-    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("CubicIndependentQA-\(UUID().uuidString)")
-    defer { try? FileManager.default.removeItem(at: directory) }
-    let url = directory.appendingPathComponent("scale.sqlite")
-    let repository = try SQLiteWorkspaceRepository(url: url)
     let saveStart = Date()
-    for _ in 0..<10 { try repository.save(workspace) }
-    let backups = try FileManager.default.contentsOfDirectory(at: directory.appendingPathComponent("scale.sqlite.backups"), includingPropertiesForKeys: [.fileSizeKey])
-    let bytes = try backups.reduce(0) { try $0 + $1.resourceValues(forKeys: [.fileSizeKey]).fileSize! }
-    print("QA BACKUPS unchanged_saves=10 backup_count=\(backups.count) backup_bytes=\(bytes) save_seconds=\(Date().timeIntervalSince(saveStart))")
-    #expect(backups.filter { $0.pathExtension == "sqlite" }.count == 1)
-    #expect(backups.allSatisfy { $0.pathExtension == "sqlite" })
-    var changed = workspace
-    for index in 0..<30 {
-        changed.items[0].name = "Version \(index)"
-        try repository.save(changed)
-    }
-    let automatic = try FileManager.default.contentsOfDirectory(at: directory.appendingPathComponent("scale.sqlite.backups"), includingPropertiesForKeys: nil)
-    #expect(automatic.filter { $0.pathExtension == "sqlite" }.count <= 20)
-    #expect(automatic.allSatisfy { $0.pathExtension == "sqlite" })
-    let explicit = try repository.backup()
-    for index in 30..<55 {
-        changed.items[0].name = "Version \(index)"
-        try repository.save(changed)
-    }
-    #expect(FileManager.default.fileExists(atPath: explicit.path))
-    #expect(try SQLiteWorkspaceRepository(url: url).load() == changed)
+    #expect(try persistedCopy(workspace) == workspace)
+    print("QA STORAGE items=1000 save_load_seconds=\(Date().timeIntervalSince(saveStart))")
 }
 
 @Test func qaUndatedEmptyProjectIsUndetermined() throws {
     let result = try Engine.evaluate(workspace: Workspace(projects: [Project(id: "p", name: "Empty")]), slots: [], now: qaNow)
     #expect(result.projects[0].feasibility == .undetermined)
     #expect(result.feasibility == .undetermined)
-}
-
-@Test func qaSaveFailurePreservesCommittedState() throws {
-    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("CubicStorageFailure-\(UUID().uuidString)")
-    defer { try? FileManager.default.removeItem(at: directory) }
-    let url = directory.appendingPathComponent("workspace.sqlite")
-    let repository = try SQLiteWorkspaceRepository(url: url)
-    let original = Workspace.demo(now: qaNow)
-    try repository.save(original)
-    let backupDirectory = directory.appendingPathComponent("workspace.sqlite.backups")
-    try FileManager.default.removeItem(at: backupDirectory)
-    try Data("block directory".utf8).write(to: backupDirectory)
-    var changed = original
-    changed.items[0].name = "Unsaved"
-    #expect(throws: (any Error).self) { try repository.save(changed) }
-    #expect(try repository.load() == original)
-    #expect(try SQLiteWorkspaceRepository(url: url).load() == original)
 }
 
 @Test func qaPartialContinuousTrialCannotInventFeasibleSchedule() throws {
@@ -125,17 +85,9 @@ private func qaDate(_ minutes: Int) -> Date { qaNow.addingTimeInterval(Double(mi
     #expect(result.capacityMinutes == 50)
     #expect(result.itemStates.first { $0.itemID == "item-c" }?.isBlocked == true)
     #expect(result.projects.first { $0.projectID == "project-b" }?.shortageMinutes == 10)
-    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("CubicApproxQA-\(UUID().uuidString)")
-    defer { try? FileManager.default.removeItem(at: directory) }
-    let url = directory.appendingPathComponent("workspace.sqlite")
-    let repository = try SQLiteWorkspaceRepository(url: url)
-    try repository.save(workspace)
-    #expect(try SQLiteWorkspaceRepository(url: url).load() == workspace)
-    let export = directory.appendingPathComponent("portable.json")
-    try repository.export(to: export)
-    let other = try SQLiteWorkspaceRepository(url: directory.appendingPathComponent("import.sqlite"))
-    #expect(try other.importWorkspace(from: export) == workspace)
-    #expect(try other.load().workSessions[0].intervalIsExact == false)
+    let stored = try persistedCopy(workspace)
+    #expect(stored == workspace)
+    #expect(stored.workSessions[0].intervalIsExact == false)
 }
 
 @Test func qaLegacyExactWorkSessionAndInvalidApproximateIntervals() throws {

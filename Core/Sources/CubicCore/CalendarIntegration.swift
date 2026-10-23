@@ -39,7 +39,6 @@ extension Workspace {
                 reasons[block.id] = "时间块与当前日历占用、工作时段或精力要求不匹配，请重新安排。"; continue
             }
         }
-        // The projection may temporarily expose disputed overlapping blocks; neither is a verified commitment.
         var latest: WorkTimeBlock?
         for block in future {
             if let previous = latest, max(now, block.start) < previous.end {

@@ -14,12 +14,10 @@ extension Engine {
         let items = Set(workspace.items.map(\.id)), nodes = Set(workspace.nodes.map(\.id))
         let projects = Set(workspace.projects.map(\.id)), blockers = Set(workspace.blockers.map(\.id))
         let gates = Set(workspace.acceptances.map(\.id))
-        try checkIDs(options.disputedItemIDs, "planning.disputedItems")
         guard Set(options.requiredItemIDs.keys).union(options.itemDeadlines.keys).isSubset(of: items),
               Set(options.requiredNodeIDs.keys).union(options.nodeScopeComplete.keys).isSubset(of: nodes),
               Set(options.projectScopeComplete.keys).union(options.warningMargins.keys).union(options.committedProjectIDs.keys).isSubset(of: projects),
               Set(options.manualGateDates.keys).isSubset(of: gates) else { throw CoreError.missing("Planning override 引用不存在对象") }
-        guard Set(options.disputedItemIDs).isSubset(of: items) else { throw CoreError.missing("Planning disputed item 引用不存在对象") }
         for date in options.itemDeadlines.values { try checkDate(date, "planning.itemDeadline") }
         for date in options.manualGateDates.values { try checkDate(date, "planning.manualGate") }
         for margin in options.warningMargins.values { try checkMinutes(margin, "planning.warningMargin") }

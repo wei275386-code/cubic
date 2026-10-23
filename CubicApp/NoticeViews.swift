@@ -30,7 +30,7 @@ struct NoticeRow: View {
                 .font(.headline).fixedSize(horizontal: false, vertical: true)
             Text(NoticeCopy.summary(notice)).font(.subheadline).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            if ["capacityConflict", "projectRisk", "review", "syncConflict"].contains(notice.kind) {
+            if ["capacityConflict", "projectRisk", "review"].contains(notice.kind) {
                 ForEach(notice.projectIDs, id: \.self) { id in
                     if let project = model.workspace.projects.first(where: { $0.id == id }) {
                         Text("项目：\(project.name)").font(.caption).foregroundStyle(.secondary).lineLimit(2)
@@ -73,9 +73,6 @@ struct NoticeDetailView: View {
                         }.accessibilityIdentifier("notice.root.blocker")
                     } else if let gate = model.workspace.acceptances.first(where: { $0.id == notice.rootObjectID && $0.removedAt == nil }) {
                         WorkReferenceLink(subject: gate.subject, label: "检查验收：\(gate.name)", identifier: "notice.root.acceptance")
-                    } else if notice.kind == "syncConflict" {
-                        NavigationLink("处理同步冲突") { SyncConflictListView() }
-                            .accessibilityIdentifier("notice.root.sync")
                     } else if let item = model.item(notice.rootObjectID) {
                         NavigationLink { WorkDetailView(itemID: item.id) } label: {
                             Label("检查工作：\(item.name)", systemImage: "checklist").frame(minHeight: 44)

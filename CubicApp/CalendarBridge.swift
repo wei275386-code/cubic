@@ -7,7 +7,6 @@ struct CalendarBridgeContext: Sendable {
     var workspace: Workspace
     var slots: [CapacitySlot]
     var externalBusy: [BusyInterval]
-    var disputedItemIDs: Set<String> = []
     var capacityVerified = true
     var storageReady = true
     var sourceRevision = ""
@@ -49,7 +48,6 @@ struct CalendarDivergence: Identifiable, Sendable {
     let cubicEnd: Date
     let events: [CalendarBridgeEvent]
     let detectedAt: Date
-    var syncConflict: Bool = false
 }
 
 enum CalendarBridgePhase: String, Sendable {
@@ -110,7 +108,7 @@ protocol CalendarBridgeIO: Sendable {
 }
 
 /// EventKit identifiers and reconciliation baselines are device-local. Only the URL marker is portable.
-/// Domain callbacks must write through the normal durable journal command, never directly to SQLite.
+/// Domain callbacks must save through AppModel, never write workspace storage directly.
 @MainActor @Observable final class CalendarBridge {
     private(set) var status = CalendarBridgeStatus()
     private(set) var calendars: [CalendarBridgeCalendar] = []
@@ -174,7 +172,7 @@ protocol CalendarBridgeIO: Sendable {
         observer = nil
     }
 
-    /// Terminal lifecycle boundary when AppModel switches journal partitions. Background stop() is reversible.
+    /// Terminal lifecycle boundary; no further I/O is issued afterwards. Background stop() is reversible.
     func invalidate() {
         invalidated = true; configurationGeneration += 1
         stop()
@@ -306,8 +304,8 @@ protocol CalendarBridgeIO: Sendable {
         }
         guard contextIsCurrent(input), generation == configurationGeneration else { refreshRequested = true; return }
         guard input.storageReady else {
-            // SQLite can be an incomplete cache while the journal loads or fails. Never infer Calendar
-            // deletions from that projection; all actual Events remain busy until authority is available.
+            // Workspace data is not loaded yet. Never infer Calendar deletions from it;
+            // all actual Events remain busy until it is available.
             pauseAll(blocks, phase: .unavailable, message: "Cubic 权威数据尚未就绪，Apple Calendar 写入已暂停；现有日历事件保留。")
             busyEvents = events.filter(\.busy).map { BusyEvent(id: "cubic.bridge.\($0.id)", title: $0.title,
                                                              start: $0.start, end: $0.end, allDay: $0.allDay, calendarID: calendarID) }
@@ -326,7 +324,7 @@ protocol CalendarBridgeIO: Sendable {
         }
         var possibleBusy = events.filter { event in
             guard let id = event.blockID, let block = blockByID[id] else { return true }
-            return (grouped[id]?.count ?? 0) > 1 || event.fingerprint != CalendarBlockFingerprint(block) || input.disputedItemIDs.contains(block.itemID) || currentIssues[id] != nil
+            return (grouped[id]?.count ?? 0) > 1 || event.fingerprint != CalendarBlockFingerprint(block) || currentIssues[id] != nil
         }
         // Invalid mapped events also occupy real capacity and can invalidate an otherwise valid equal mapping.
         var pendingAssociationOwners: [String: String] = [:]
@@ -359,9 +357,7 @@ protocol CalendarBridgeIO: Sendable {
             let baseline = cache.events[block.id]?.lastSyncedFingerprint
             let domain = CalendarBlockFingerprint(block)
             var reason: String?
-            let syncConflict = input.disputedItemIDs.contains(block.itemID)
-            if syncConflict { reason = "此工作存在 Cubic 数据同步冲突，请先在同步冲突中确认版本。" }
-            else if matches.count > 1 { reason = "同一时间块有多个 Apple Calendar 事件，请保留一个事件后重新核对。" }
+            if matches.count > 1 { reason = "同一时间块有多个 Apple Calendar 事件，请保留一个事件后重新核对。" }
             else if let event = matches.first {
                 if event.allDay || event.recurring { reason = "全天或重复事件不能自动成为 Cubic 工作时间块，请改为单次具体时段。" }
                 else if event.fingerprint == domain {
@@ -402,15 +398,13 @@ protocol CalendarBridgeIO: Sendable {
             if let reason {
                 failures.append(CalendarDivergence(blockID: block.id, itemID: block.itemID, reason: reason,
                                                    cubicStart: block.start, cubicEnd: block.end, events: matches,
-                                                   detectedAt: divergences.first(where: { $0.blockID == block.id })?.detectedAt ?? now,
-                                                   syncConflict: syncConflict))
+                                                   detectedAt: divergences.first(where: { $0.blockID == block.id })?.detectedAt ?? now))
                 busy.append(contentsOf: matches)
             }
         }
         // Only a previously mapped local block can justify deleting an Event. Unknown markers await data sync.
         for id in Array(cache.events.keys) where !blockIDs.contains(id) {
             guard contextIsCurrent(input), generation == configurationGeneration else { refreshRequested = true; return }
-            if let itemID = cache.events[id]?.itemID, input.disputedItemIDs.contains(itemID) { continue }
             do {
                 for event in grouped[id] ?? [] {
                     guard contextIsCurrent(input), generation == configurationGeneration else { refreshRequested = true; return }
@@ -457,7 +451,6 @@ protocol CalendarBridgeIO: Sendable {
         let generation = configurationGeneration
         guard input.capacityVerified else { throw CalendarBridgeError.invalid("外部日历占用尚未核实，请刷新日历后再接受修改。") }
         guard !event.allDay, !event.recurring else { throw CalendarBridgeError.invalid("请选择单次、非全天事件。") }
-        guard !input.disputedItemIDs.contains(block.itemID) else { throw CalendarBridgeError.invalid("请先解决此工作的 Cubic 数据同步冲突。") }
         let proposed = WorkTimeBlock(id: block.id, itemID: block.itemID, start: event.start, end: event.end)
         var draft = input.workspace
         let bridgeBusy = validationBusyEvents.filter { $0.id != "cubic.bridge.\(event.id)" }.map { BusyInterval(start: $0.start, end: $0.end) }
@@ -502,8 +495,9 @@ protocol CalendarBridgeIO: Sendable {
     func accept(blockID: String) async throws {
         try await beginInteraction()
         defer { endInteraction() }
-        guard let divergence = divergences.first(where: { $0.blockID == blockID }), divergence.events.count == 1,
-              !divergence.syncConflict else { throw CalendarBridgeError.invalid("请先解决同步冲突，或选择一个有效的 Apple Calendar 事件。") }
+        guard let divergence = divergences.first(where: { $0.blockID == blockID }), divergence.events.count == 1 else {
+            throw CalendarBridgeError.invalid("请选择一个有效的 Apple Calendar 事件。")
+        }
         let input = await context()
         try ensureWritable(input)
         guard let block = input.workspace.timeBlocks?.first(where: { $0.id == blockID }), let calendarID = boundCalendarID else { throw CalendarBridgeError.invalid("时间块或绑定日历已不可用。") }
@@ -546,17 +540,14 @@ protocol CalendarBridgeIO: Sendable {
         let input = await context()
         try ensureWritable(input)
         let block = WorkTimeBlock(itemID: itemID, start: event.start, end: event.end)
-        guard input.capacityVerified, !event.allDay, !event.recurring, !input.disputedItemIDs.contains(itemID) else { throw CalendarBridgeError.invalid("请先核实日历占用并解决同步冲突；只支持单次、非全天事件。") }
+        guard input.capacityVerified, !event.allDay, !event.recurring else { throw CalendarBridgeError.invalid("请先核实日历占用；只支持单次、非全天事件。") }
         var draft = input.workspace
         let otherBusy = validationBusyEvents.filter { $0.id != "cubic.bridge.\(event.id)" }.map { BusyInterval(start: $0.start, end: $0.end) }
         try draft.setTimeBlock(block, slots: input.slots, busy: input.externalBusy + otherBusy, now: Date())
-        // Association intent must survive a partial domain commit too. No marker/deletion is issued
-        // while storageReady is false. A definite pre-commit failure removes only this local intent.
+        // A failed save removes only this local association intent.
         cache.events[block.id] = CalendarEventCache(itemID: itemID, localEventIdentifier: event.id)
         persist()
         do { try await applyExternal(block, nil, event.id) }
-        catch let failure as SyncLocalCommitFailure { throw failure }
-        catch let committed as WorkspaceCommittedProjectionUnavailable { throw committed }
         catch { cache.events[block.id] = nil; persist(); throw error }
         try ensureActive()
         let committedInput = await context()
@@ -603,7 +594,6 @@ protocol CalendarBridgeIO: Sendable {
     private func restore(_ block: WorkTimeBlock, input: CalendarBridgeContext, calendarID: String,
                          index: (blocks: [String: [CalendarBridgeEvent]], localIDs: [String: CalendarBridgeEvent])) async throws {
         try ensureWritable(input)
-        guard !input.disputedItemIDs.contains(block.itemID) else { throw CalendarBridgeError.invalid("请先解决此工作的 Cubic 数据同步冲突。") }
         let matches = index.blocks[block.id] ?? []
         guard matches.count <= 1 else { throw CalendarBridgeError.invalid("请先在 Apple Calendar 删除重复事件，保留一个事件后再恢复。") }
         let pendingAssociation = cache.events[block.id]?.localEventIdentifier.flatMap { identifier in

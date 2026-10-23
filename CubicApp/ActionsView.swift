@@ -106,9 +106,8 @@ struct ActionsView: View {
                 }
             }
             Section("回顾与跟进") {
-                Label(model.syncStatus.phase.label, systemImage: model.syncStatus.phase == .synced ? "icloud" : "icloud.slash")
+                Label(model.syncState.label, systemImage: model.syncState.phase == .synced ? "icloud" : "icloud.slash")
                     .font(.caption).foregroundStyle(.secondary)
-                if !model.syncStatus.conflicts.isEmpty { NavigationLink("处理同步冲突") { SyncConflictListView() } }
                 NavigationLink { ReviewView() } label: { Label("查看待处理事项", systemImage: "checklist") }
                     .accessibilityIdentifier("actions.review")
                 NavigationLink { NoticeListView() } label: { Label("待处理提醒（\(model.notices.filter { !$0.isResolved }.count)）", systemImage: "bell.badge") }

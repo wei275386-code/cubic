@@ -266,7 +266,7 @@ struct CalendarView: View {
         if let choice = model.workspace.currentNextAction,
            let event = model.workspace.history.last(where: { $0.objectID == choice.id && $0.kind == .choiceRecorded && $0.detail != nil }),
            let detail = event.detail?.data(using: .utf8),
-           let trial = try? SyncCoding.decode(PlanningTrialResult.self, from: detail) {
+           let trial = try? JSONCoding.decode(PlanningTrialResult.self, from: detail) {
             Section("上次选择时的试算") {
                 Toggle("显示当时的建议安排", isOn: $showSelectedTrial)
                 Text("选择于 \(calendarDate(choice.date))。这是当时的试算，当前条件可能已经变化。")

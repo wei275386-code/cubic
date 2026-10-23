@@ -133,9 +133,9 @@ public struct ProjectTemplate: Codable, Sendable, Equatable, Identifiable {
     public var isArchived: Bool?
     public var archivedAt: Date?
     public let provenanceProjectName: String?
-    /// Local quarantine survives storage/backup; SyncDocument omits it from user-edit registers.
+    /// Why this template cannot be used (for example an unrecognized payload).
     public internal(set) var availabilityIssue: String?
-    private let unrecognizedPayload: SyncValue?
+    private let unrecognizedPayload: JSONValue?
     public init(id: String = UUID().uuidString, title: String, payload: ProjectTemplatePayload,
                 createdAt: Date? = nil, renamedAt: Date? = nil, removedAt: Date? = nil,
                 isArchived: Bool? = nil, archivedAt: Date? = nil, provenanceProjectName: String? = nil) {
@@ -173,7 +173,7 @@ public struct ProjectTemplate: Codable, Sendable, Equatable, Identifiable {
         if let value = try? c.decode(ProjectTemplatePayload.self, forKey: .payload) {
             payload = value; unrecognizedPayload = nil
         } else {
-            payload = nil; unrecognizedPayload = try c.decodeIfPresent(SyncValue.self, forKey: .payload)
+            payload = nil; unrecognizedPayload = try c.decodeIfPresent(JSONValue.self, forKey: .payload)
         }
         createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt)
         renamedAt = try c.decodeIfPresent(Date.self, forKey: .renamedAt)

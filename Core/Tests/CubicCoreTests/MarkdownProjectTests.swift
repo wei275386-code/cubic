@@ -89,7 +89,7 @@ struct MarkdownProjectTests {
         #expect(workspace == original)
     }
 
-    @Test func sourceOrderSurvivesSyncProjectionAndRepositoryRestore() throws {
+    @Test func sourceOrderSurvivesStorage() throws {
         var workspace = Workspace.empty
         let id = try workspace.addMarkdownProject(sample, now: now, timeZone: zone)
         // Force IDs to sort against source order to catch accidental ID-order projection.
@@ -105,20 +105,11 @@ struct MarkdownProjectTests {
         }
         // Renaming item IDs would also require renaming immutable estimate/history facts.
         workspace.items.reverse()
-        let document = try SyncDocument(workspace, choice: nil)
-        let projected = try SyncDocument.workspace(document.values)
-        try projected.validate()
-        let structure = projected.projectStructure(projectID: id)
+        let restored = try persistedCopy(workspace)
+        let structure = restored.projectStructure(projectID: id)
         #expect(structure.nodes.map(\.name) == ["支出分类", "复盘"])
         #expect(structure.membersByNode[structure.nodes[0].id]?.map(\.name) == ["大额消费校对", "标签化", "数据分布统计"])
         #expect(structure.membersByNode[structure.nodes[1].id]?.map(\.name) == ["具体调整目标"])
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let repository = try SQLiteWorkspaceRepository(url: directory.appendingPathComponent("workspace.sqlite"))
-        try repository.save(projected)
-        let restored = try repository.load()
-        #expect(restored.nodes.map(\.name) == projected.nodes.map(\.name))
-        #expect(restored.items.map(\.name) == projected.items.map(\.name))
-        #expect(restored.items.map(\.structureOrder) == projected.items.map(\.structureOrder))
+        #expect(restored.items.map(\.structureOrder) == workspace.items.map(\.structureOrder))
     }
 }

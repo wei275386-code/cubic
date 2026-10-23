@@ -18,7 +18,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var preferences = UserPreferences()
     @State private var draftLoaded = false
-    @State private var originalPreferences: [String: SyncValue] = [:]
+    @State private var originalPreferences: [String: JSONValue] = [:]
     @State private var exporting = false
     @State private var importing = false
     @State private var selectingSyncDirectory = false
@@ -143,7 +143,7 @@ struct SettingsView: View {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") {
-                        Task { if await model.savePreferences(preferences, comparedTo: originalPreferences) { dismiss() } }
+                        Task { if await model.savePreferences(preferences) { dismiss() } }
                     }.disabled(busy)
                 }
             }
@@ -186,12 +186,11 @@ struct SettingsView: View {
                     let access = url.startAccessingSecurityScopedResource()
                     defer { if access { url.stopAccessingSecurityScopedResource() } }
                     let data = try Data(contentsOf: url)
-                    guard data.count <= 64 * 1024 * 1024 else { throw BackupError.tooLarge }
                     pendingImport = data; importConfirm = true
                 } catch { model.reportFailure("备份未能读取", message: error.localizedDescription, context: backupMessageContext) }
             }
-            .confirmationDialog("将备份与当前数据合并？历史会保留，有冲突时需要你确认。", isPresented: $importConfirm, titleVisibility: .visible) {
-                Button("合并备份") {
+            .confirmationDialog("用备份替换当前数据？当前数据会被覆盖，建议先导出一份备份。", isPresented: $importConfirm, titleVisibility: .visible) {
+                Button("用备份替换", role: .destructive) {
                     if let data = pendingImport { Task { if await model.importBackup(data) { dismiss() } } }
                 }
                 Button("取消", role: .cancel) { pendingImport = nil }
@@ -215,14 +214,5 @@ struct SettingsView: View {
     }
     private func openSettings() {
         CubicSystemSettings.open()
-    }
-}
-enum BackupError: LocalizedError {
-    case tooLarge, unsupported
-    var errorDescription: String? {
-        switch self {
-        case .tooLarge: "备份超过 64 MB，无法导入。请检查文件；当前数据未改变。"
-        case .unsupported: "无法读取这个备份格式，请选择 Cubic 备份文件。当前数据未改变。"
-        }
     }
 }

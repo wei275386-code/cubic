@@ -15,11 +15,6 @@ import CubicCore
         "\(date(start, model: model)) – \(date(end, model: model))"
     }
 
-    static func hasSyncConflict(_ block: WorkTimeBlock, model: AppModel) -> Bool {
-        model.syncStatus.conflicts.contains { conflict in
-            conflict.affectedItemIDs.contains(block.itemID) || conflict.paths.contains { $0.collection == "timeBlocks" && $0.entityID == block.id }
-        }
-    }
 }
 
 extension CalendarBridgePhase {
@@ -38,7 +33,6 @@ extension CalendarBridgePhase {
 
 extension CalendarIntegrationCopy {
     static func blockStatus(_ block: WorkTimeBlock, model: AppModel) -> String {
-        if hasSyncConflict(block, model: model) { return "同步冲突暂停" }
         guard let bridge = model.calendarBridge, bridge.enabled else { return "仅保存在 Cubic" }
         if !bridge.status.authorized { return "日历权限不可用" }
         if bridge.divergences.contains(where: { $0.blockID == block.id }) { return "Apple Calendar 修改待确认" }
@@ -214,9 +208,7 @@ struct CalendarTimeBlockIntegrationRow: View {
         VStack(alignment: .leading, spacing: 6) {
             Label(CalendarIntegrationCopy.blockStatus(block, model: model), systemImage: "calendar.badge.clock")
                 .font(.subheadline).accessibilityIdentifier("calendar.block.sync.\(block.id)")
-            if CalendarIntegrationCopy.hasSyncConflict(block, model: model) {
-                NavigationLink("先处理 Cubic 数据同步冲突") { SyncConflictListView() }
-            } else if model.calendarBridge?.pausedBlockIDs.contains(block.id) == true {
+            if model.calendarBridge?.pausedBlockIDs.contains(block.id) == true {
                 NavigationLink("核对这个时间块") { CalendarIntegrationReviewView(focusBlockID: block.id) }
             } else {
                 NavigationLink("查看 Apple Calendar 同步") { CalendarIntegrationSettingsView() }
@@ -282,11 +274,6 @@ private struct CalendarDivergenceSection: View {
     @State private var busy = false
     @State private var confirmingCancel = false
     @State private var errorMessage: String?
-    private var syncConflict: Bool {
-        divergence.syncConflict || model.syncStatus.conflicts.contains { conflict in
-            conflict.affectedItemIDs.contains(divergence.itemID) || conflict.paths.contains { $0.collection == "timeBlocks" && $0.entityID == divergence.blockID }
-        }
-    }
     var body: some View {
         Section {
             if model.item(divergence.itemID) != nil {
@@ -316,24 +303,17 @@ private struct CalendarDivergenceSection: View {
             }
             Text("发现于 \(CalendarIntegrationCopy.date(divergence.detectedAt, model: model))")
                 .font(.caption).foregroundStyle(.secondary)
-            if syncConflict {
-                NavigationLink("先处理 Cubic 数据同步冲突") { SyncConflictListView() }
-                    .accessibilityIdentifier("calendar.divergence.syncConflict.\(divergence.blockID)")
-                Text("确认数据版本后再核对日历，Calendar 不会自行选择其中一方。")
+            Button("接受 Apple Calendar 修改") { perform { try await bridge.accept(blockID: divergence.blockID) } }
+                .disabled(divergence.events.count != 1)
+                .accessibilityIdentifier("calendar.divergence.accept.\(divergence.blockID)")
+            if divergence.events.count != 1 {
+                Text(divergence.events.isEmpty ? "事件已不在日历中。可恢复 Cubic 时间，或取消此时间块。" : "请先在 Apple Calendar 中保留一个对应事件，再接受修改。")
                     .font(.caption).foregroundStyle(.secondary)
-            } else {
-                Button("接受 Apple Calendar 修改") { perform { try await bridge.accept(blockID: divergence.blockID) } }
-                    .disabled(divergence.events.count != 1)
-                    .accessibilityIdentifier("calendar.divergence.accept.\(divergence.blockID)")
-                if divergence.events.count != 1 {
-                    Text(divergence.events.isEmpty ? "事件已不在日历中。可恢复 Cubic 时间，或取消此时间块。" : "请先在 Apple Calendar 中保留一个对应事件，再接受修改。")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                Button("恢复 Cubic 时间") { perform { try await bridge.restore(blockID: divergence.blockID) } }
-                    .accessibilityIdentifier("calendar.divergence.restore.\(divergence.blockID)")
-                Button("取消 Cubic 时间块（保留工作）", role: .destructive) { confirmingCancel = true }
-                    .accessibilityIdentifier("calendar.divergence.cancel.\(divergence.blockID)")
             }
+            Button("恢复 Cubic 时间") { perform { try await bridge.restore(blockID: divergence.blockID) } }
+                .accessibilityIdentifier("calendar.divergence.restore.\(divergence.blockID)")
+            Button("取消 Cubic 时间块（保留工作）", role: .destructive) { confirmingCancel = true }
+                .accessibilityIdentifier("calendar.divergence.cancel.\(divergence.blockID)")
             if busy { ProgressView("正在核对…") }
             if let errorMessage {
                 Label(errorMessage, systemImage: "exclamationmark.triangle")

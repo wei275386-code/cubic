@@ -61,14 +61,13 @@ private struct SyncedCalendarSettings: Codable {
 }
 
 enum ReminderCategory: String, CaseIterable, Sendable {
-    case risks, waiting, results, unlocks, synchronization
+    case risks, waiting, results, unlocks
     var label: String {
         switch self {
         case .risks: "截止与时间不足"
         case .waiting: "等待与跟进到期"
         case .results: "验收未通过与成果复核"
         case .unlocks: "等待结束与可开始的工作"
-        case .synchronization: "同步冲突"
         }
     }
     static func category(for kind: String) -> Self {
@@ -76,7 +75,6 @@ enum ReminderCategory: String, CaseIterable, Sendable {
         case "followUp", "waitingExpected": .waiting
         case "review", "acceptanceFailed": .results
         case "unlock": .unlocks
-        case "syncConflict": .synchronization
         default: .risks
         }
     }
@@ -134,9 +132,9 @@ struct UserPreferences: Codable, Sendable, Equatable {
     func save(defaults: UserDefaults = .standard) {
         if let data = try? JSONEncoder().encode(self) { defaults.set(data, forKey: "cubic.preferences") }
     }
-    func syncValues(calendars: [DeviceCalendar]) throws -> [String: SyncValue] {
-        func value<T: Encodable>(_ value: T) throws -> SyncValue {
-            try JSONDecoder().decode(SyncValue.self, from: JSONEncoder().encode(value))
+    func syncValues(calendars: [DeviceCalendar]) throws -> [String: JSONValue] {
+        func value<T: Encodable>(_ value: T) throws -> JSONValue {
+            try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(value))
         }
         let selections = selectedCalendarIDs.map { ids in
             ids.sorted().map { id in
@@ -155,9 +153,9 @@ struct UserPreferences: Codable, Sendable, Equatable {
             "remindersEnabled": .bool(remindersEnabled),
             "disabledReminderCategories": try value((disabledReminderCategories ?? []).sorted())]
     }
-    func applyingSyncValues(_ fields: [String: SyncValue], calendars: [DeviceCalendar]) throws -> Self {
+    func applyingSyncValues(_ fields: [String: JSONValue], calendars: [DeviceCalendar]) throws -> Self {
         var result = self
-        func decode<T: Decodable>(_ type: T.Type, _ value: SyncValue) throws -> T {
+        func decode<T: Decodable>(_ type: T.Type, _ value: JSONValue) throws -> T {
             try JSONDecoder().decode(type, from: JSONEncoder().encode(value))
         }
         if let field = fields["workSchedule"] {

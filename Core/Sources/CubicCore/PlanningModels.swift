@@ -37,8 +37,6 @@ public struct PlanningOptions: Codable, Sendable, Equatable {
     public var itemDeadlines: [String: Date]
     public var warningMargins: [String: Int]
     public var manualGateDates: [String: Date]
-    /// Marks local uncertainty without destroying a known remaining estimate in the factual source.
-    public var disputedItemIDs: [String]
     public var waits: [PlanningWait]
     /// Caps expensive interval proofs; skipped proofs are never treated as successful schedules.
     public var maximumIntervalChecks: Int
@@ -47,14 +45,12 @@ public struct PlanningOptions: Codable, Sendable, Equatable {
                 requiredItemIDs: [String: Bool] = [:], requiredNodeIDs: [String: Bool] = [:],
                 committedProjectIDs: [String: Bool] = [:], itemDeadlines: [String: Date] = [:],
                 warningMargins: [String: Int] = [:], manualGateDates: [String: Date] = [:],
-                waits: [PlanningWait] = [], maximumIntervalChecks: Int = 100_000,
-                disputedItemIDs: [String] = []) {
+                waits: [PlanningWait] = [], maximumIntervalChecks: Int = 100_000) {
         self.capacityVerified = capacityVerified; self.capacityNote = capacityNote
         self.projectScopeComplete = projectScopeComplete; self.nodeScopeComplete = nodeScopeComplete
         self.requiredItemIDs = requiredItemIDs; self.requiredNodeIDs = requiredNodeIDs
         self.committedProjectIDs = committedProjectIDs; self.itemDeadlines = itemDeadlines
         self.warningMargins = warningMargins; self.manualGateDates = manualGateDates
-        self.disputedItemIDs = disputedItemIDs
         self.waits = waits; self.maximumIntervalChecks = maximumIntervalChecks
     }
 }
