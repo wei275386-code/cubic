@@ -136,8 +136,6 @@ private func assertTimeBlockRejected(_ original: Workspace, _ block: WorkTimeBlo
 
         let single = try Engine.trial(workspace: workspace, request: PlanningTrialRequest(itemID: "a", minutes: 30, start: wcNow), input: PlanningInput(slots: [wcSlot(0, 180)], now: wcNow))
         #expect(single.allocations.allSatisfy { $0.start >= wcDate(60) })
-        let legacyMulti = try Engine.trial(workspace: workspace, selections: [TrialSelection(itemID: "a", minutes: 30), TrialSelection(itemID: "c", minutes: 30)], slots: [wcSlot(0, 180)], now: wcNow)
-        #expect(legacyMulti.allocations.allSatisfy { !($0.start < wcDate(60) && $0.end > wcDate(30)) })
 
         var invalidCondition = workspace
         try invalidCondition.setItemDisposition(id: "a", disposition: .deferred, now: wcDate(1))

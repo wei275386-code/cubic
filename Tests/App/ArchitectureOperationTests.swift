@@ -95,7 +95,7 @@ actor FakeCalendarIO: CalendarBridgeIO {
             state.commits += 1
             var candidate = state.current
             let scenario = result.scenario ?? result.baseline
-            let trial = TrialResult(selections: [.init(itemID: "a", minutes: 30)], allocations: result.allocations, unallocatedMinutes: result.unallocatedMinutes ?? 0, snapshot: scenario.legacy, planning: result)
+            let trial = TrialResult(selections: [.init(itemID: "a", minutes: 30)], allocations: result.allocations, unallocatedMinutes: result.unallocatedMinutes ?? 0, snapshot: scenario.summary, planning: result)
             try candidate.chooseNextAction(itemID: "a", now: now, trial: trial, dataVersion: "test", impactWasVerified: true, note: note)
             candidate.history.append(HistoryEvent(date: now, kind: .choiceRecorded, objectID: candidate.currentChoiceID!, detail: String(decoding: try JSONCoding.encode(result), as: UTF8.self)))
             state.current = candidate

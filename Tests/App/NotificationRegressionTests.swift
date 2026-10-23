@@ -127,7 +127,7 @@ actor FakeNotificationCenter: ReminderNotificationCenter {
 
         let center = FakeNotificationCenter(), service = ReminderService(center: center)
         let legacyContent = UNMutableNotificationContent(); legacyContent.body = "旧风险"
-        let legacy = UNNotificationRequest(identifier: "cubic.legacy", content: legacyContent,
+        let legacy = UNNotificationRequest(identifier: "cubic.summary", content: legacyContent,
                                            trigger: UNTimeIntervalNotificationTrigger(timeInterval: 2, repeats: false))
         let unrelated = UNNotificationRequest(identifier: "unrelated", content: legacyContent, trigger: nil)
         await center.seed([legacy, unrelated].map { ImmutableNotificationRequest(request: $0) })

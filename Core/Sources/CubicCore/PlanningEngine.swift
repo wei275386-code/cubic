@@ -15,8 +15,8 @@ extension Engine {
         let projects = Set(workspace.projects.map(\.id)), blockers = Set(workspace.blockers.map(\.id))
         let gates = Set(workspace.acceptances.map(\.id))
         guard Set(options.requiredItemIDs.keys).union(options.itemDeadlines.keys).isSubset(of: items),
-              Set(options.requiredNodeIDs.keys).union(options.nodeScopeComplete.keys).isSubset(of: nodes),
-              Set(options.projectScopeComplete.keys).union(options.warningMargins.keys).union(options.committedProjectIDs.keys).isSubset(of: projects),
+              Set(options.requiredNodeIDs.keys).isSubset(of: nodes),
+              Set(options.warningMargins.keys).union(options.committedProjectIDs.keys).isSubset(of: projects),
               Set(options.manualGateDates.keys).isSubset(of: gates) else { throw CoreError.missing("Planning override 引用不存在对象") }
         for date in options.itemDeadlines.values { try checkDate(date, "planning.itemDeadline") }
         for date in options.manualGateDates.values { try checkDate(date, "planning.manualGate") }
@@ -57,7 +57,7 @@ extension Engine {
         // Try two independently validated candidates. Neither failing proves impossibility.
         let globalWitness = globalForward.isComplete ? globalForward : (globalReverse.isComplete ? globalReverse : globalForward)
         var proofs = solution.certificates(keys: globalKeys), assessments: [PlanningProjectAssessment] = []
-        var legacyProjects: [ProjectAssessment] = [], boundaries: [PlanningBoundary] = []
+        var summaryProjects: [ProjectAssessment] = [], boundaries: [PlanningBoundary] = []
         boundaries += solution.boundaries(keys: globalKeys, layer: .dependency, projectIDs: graph.projectRequirements.keys.sorted())
         boundaries += solution.boundaries(keys: globalKeys, layer: .global, projectIDs: graph.projectRequirements.keys.sorted(),
             candidate: globalReverse.isComplete ? globalReverse : nil)
@@ -138,7 +138,7 @@ extension Engine {
                 knownCapacityMinutes: planningMinutes(available + scheduledSeconds), feasibility: feasibility, scopeComplete: scope,
                 warningMarginMinutes: margin, slackLowerBoundMinutes: lower, slackUpperBoundMinutes: upper,
                 warningState: warning, conditionIDs: conditionIDs, witness: scheduled.adding(to: witness, itemIDs: scheduledIDs)))
-            legacyProjects.append(ProjectAssessment(projectID: project.id,
+            summaryProjects.append(ProjectAssessment(projectID: project.id,
                 demandMinutes: scope && allKnown ? planningMinutes(known + scheduledSeconds, up: true) : nil,
                 capacityMinutes: planningMinutes(available + scheduledSeconds), shortageMinutes: covered ? (projectProofs.map(\.shortageMinutes).max() ?? 0) : nil,
                 feasibility: feasibility, conditionalItemIDs: labor.filter { !$0.actual && (!$0.predecessors.isEmpty || $0.unknown) }.map(\.objectID).sorted()))
@@ -206,9 +206,9 @@ extension Engine {
         }
         var distinctRisks: [Risk] = []
         for risk in risks where !distinctRisks.contains(risk) { distinctRisks.append(risk) }
-        let legacy = EngineSnapshot(availableActions: actions, itemStates: graph.states, risks: distinctRisks,
-            projects: legacyProjects, capacityMinutes: planningMinutes(pool.seconds(start: input.now, end: input.horizonEnd)), feasibility: feasibility)
-        return PlanningSnapshot(source: PlanningSource(workspace: workspace, input: input), legacy: legacy,
+        let summary = EngineSnapshot(availableActions: actions, itemStates: graph.states, risks: distinctRisks,
+            projects: summaryProjects, capacityMinutes: planningMinutes(pool.seconds(start: input.now, end: input.horizonEnd)), feasibility: feasibility)
+        return PlanningSnapshot(source: PlanningSource(workspace: workspace, input: input), summary: summary,
             knownDemandMinutes: planningMinutes(knownDeclared + scheduled.blocks.filter { graph.declared.contains("item:\($0.itemID)") }.reduce(0.0) { $0 + $1.end.timeIntervalSince($1.start) }, up: true),
             committedDemandMinutes: planningMinutes(knownGlobal + scheduled.blocks.filter { graph.committed.contains("item:\($0.itemID)") }.reduce(0.0) { $0 + $1.end.timeIntervalSince($1.start) }, up: true), unknowns: unknowns,
             conditions: graph.conditions, witness: scheduled.adding(to: globalWitness), boundaries: boundaries,

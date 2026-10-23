@@ -12,7 +12,7 @@ private func qaDate(_ minutes: Int) -> Date { qaNow.addingTimeInterval(Double(mi
     print("QA CROSS-DEADLINE global=\(result.feasibility) projects=\(result.projects)")
     #expect(result.feasibility == .infeasible)
     #expect(result.projects.first { $0.projectID == "early" }?.shortageMinutes == 60)
-    let trial = try Engine.trial(workspace: workspace, selections: [TrialSelection(itemID: "shared", minutes: 60)], slots: slots, now: qaNow)
+    let trial = try Engine.trial(workspace: workspace, selection: TrialSelection(itemID: "shared", minutes: 60), slots: slots, now: qaNow)
     // PRD §10.1/D13: the selected future block may expose a missed delivery
     // deadline; productive labor stays visible rather than being silently moved.
     #expect(trial.unallocatedMinutes == 0)
@@ -59,10 +59,10 @@ private func qaDate(_ minutes: Int) -> Date { qaNow.addingTimeInterval(Double(mi
     #expect(baseline.feasibility == .infeasible)
     #expect(baseline.risks.contains { $0.kind == .continuousConstraint })
     // PRD D13: partial continuous trials report unallocated labor, no fake split.
-    let partial = try Engine.trial(workspace: workspace, selections: [TrialSelection(itemID: "continuous", minutes: 30)], slots: windows, now: qaNow)
+    let partial = try Engine.trial(workspace: workspace, selection: TrialSelection(itemID: "continuous", minutes: 30), slots: windows, now: qaNow)
     #expect(partial.allocations.isEmpty)
     #expect(partial.unallocatedMinutes == 30)
-    let full = try Engine.trial(workspace: workspace, selections: [TrialSelection(itemID: "continuous", minutes: 60)], slots: windows, now: qaNow)
+    let full = try Engine.trial(workspace: workspace, selection: TrialSelection(itemID: "continuous", minutes: 60), slots: windows, now: qaNow)
     #expect(full.allocations.isEmpty)
     #expect(full.unallocatedMinutes == 60)
     #expect(full.snapshot.feasibility == .infeasible)

@@ -15,7 +15,7 @@ import Testing
         let original = workspace
         let plan = try PRD.plan(workspace)
         #expect(plan.unknowns.isEmpty)
-        #expect(plan.legacy.risks.isEmpty)
+        #expect(plan.summary.risks.isEmpty)
         #expect(plan.committedDemandMinutes == 0)
         #expect(plan.projects.isEmpty)
         #expect(workspace == original)
@@ -35,7 +35,7 @@ import Testing
         let plan = try PRD.plan(workspace)
         #expect(Set(plan.unknowns.map(\.objectID)).isSuperset(of: ["old-work", "old-wait", "old-node"]))
         #expect(plan.projects.map(\.projectID) == ["live"])
-        #expect(plan.legacy.risks.contains { $0.kind == .insufficientInformation && $0.itemIDs.contains("old-work") })
+        #expect(plan.summary.risks.contains { $0.kind == .insufficientInformation && $0.itemIDs.contains("old-work") })
     }
 
     @Test func optionalCurrentActionKeepsUnknownPrerequisites() throws {
@@ -62,6 +62,6 @@ import Testing
         let workspace = Workspace(items: [WorkItem(id: "old", name: "old", remainingMinutes: nil, disposition: .cancelled, isArchived: true)])
         let plan = try PRD.plan(workspace, options: PlanningOptions(capacityVerified: false, capacityNote: "capacity unchecked"))
         #expect(plan.unknowns.map(\.objectID) == ["capacity"])
-        #expect(plan.legacy.risks.contains { $0.kind == .insufficientInformation && $0.itemIDs.isEmpty })
+        #expect(plan.summary.risks.contains { $0.kind == .insufficientInformation && $0.itemIDs.isEmpty })
     }
 }

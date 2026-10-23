@@ -42,7 +42,7 @@ private var r2Slots: [CapacitySlot] { [CapacitySlot(start: r2Now, end: r2Date(24
         try estimate.updateRemaining(itemID: "x", minutes: 15, now: r2Now)
         let invalidEstimate = try Engine.plan(workspace: estimate, input: PlanningInput(slots: r2Slots, now: r2Now))
         #expect(invalidEstimate.unknowns.contains { $0.objectID == "x" && $0.message.contains("时间块") })
-        #expect(invalidEstimate.legacy.capacityMinutes == 240)
+        #expect(invalidEstimate.summary.capacityMinutes == 240)
         #expect(estimate.items[0].remainingMinutes == 15 && estimate.workSessions.isEmpty)
         let expired = try Engine.plan(workspace: w, input: PlanningInput(slots: r2Slots, now: r2Date(90)))
         #expect(expired.knownDemandMinutes == 60)
@@ -64,7 +64,7 @@ private var r2Slots: [CapacitySlot] { [CapacitySlot(start: r2Now, end: r2Date(24
             let plan = try Engine.plan(workspace: created, input: PlanningInput(slots: r2Slots, now: r2Now))
             #expect(plan.witness.allocations.count == 1)
             #expect(plan.knownDemandMinutes == 60 && plan.committedDemandMinutes == 60)
-            #expect(plan.legacy.capacityMinutes == 180)
+            #expect(plan.summary.capacityMinutes == 180)
             #expect(plan.projects.allSatisfy { $0.knownDemandMinutes == 60 })
             try w.setTimeBlock(WorkTimeBlock(id: "block", itemID: "shared", start: r2Date(60), end: r2Date(120)), slots: r2Slots, now: r2Now)
             let moved = try await store.save(workspace: w).workspace
