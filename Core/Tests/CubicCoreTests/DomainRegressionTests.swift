@@ -4,7 +4,7 @@ import Testing
 
 /// Independent fix-milestone regressions. Parse alone is not a test PASS.
 /// Fixtures express PRD outcomes and inspect public facts; no synthetic dependency ID is hard-coded.
-@Suite(.serialized) struct PRDRegressionTests {
+@Suite(.serialized) struct DomainRegressionTests {
     private let origin = ISO8601DateFormatter().date(from: "2026-10-04T14:00:00+08:00")!
     private func at(_ minutes: Int) -> Date { origin.addingTimeInterval(Double(minutes) * 60) }
     private func project(_ id: String) -> Project {

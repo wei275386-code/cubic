@@ -50,7 +50,7 @@ enum PRD {
     }
 }
 
-@Suite(.serialized) struct PRDPlanningTests {
+@Suite(.serialized) struct PlanningTests {
     @Test func abc240GoldenBaselineTrialActual() throws {
         var w = PRD.abc
         let original = w, input = PRD.abcInput
