@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import CubicCore
 
-@Suite(.serialized) struct PRDDomainTests {
+@Suite(.serialized) struct DomainRulesTests {
     private func nodeWorkspace() -> Workspace {
         Workspace(projects:[PRD.project()],nodes:[Node(id:"n",projectID:"p",name:"n",planningCompleteness:.complete)],
                   items:[WorkItem(id:"a",name:"a",nodeID:"n",projectIDs:["p"],remainingMinutes:20),WorkItem(id:"b",name:"b",nodeID:"n",projectIDs:["p"],remainingMinutes:20)],

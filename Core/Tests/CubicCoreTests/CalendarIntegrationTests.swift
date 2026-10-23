@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import CubicCore
 
-@Suite struct CalendarIntegrationQATests {
+@Suite struct CalendarIntegrationTests {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
     private func at(_ minutes: Int) -> Date { now.addingTimeInterval(Double(minutes) * 60) }
     private func workspace() -> Workspace {

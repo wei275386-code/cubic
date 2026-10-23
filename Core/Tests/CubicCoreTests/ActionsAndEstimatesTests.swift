@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import CubicCore
 
-@Suite struct UXSimplificationTests {
+@Suite struct ActionsAndEstimatesTests {
     @Test func actionVisibilityHonorsProjectArchiveAndKeepsSharedAndIndependentWork() throws {
         var w = Workspace(projects: [Project(id: "old", name: "Archived", isArchived: true), Project(id: "current", name: "Current")], items: [
             WorkItem(id: "old-only", name: "Old", projectIDs: ["old"], remainingMinutes: 30),

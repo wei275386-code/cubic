@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import CubicCore
 
-@Suite(.serialized) struct PRDStoragePerformanceTests {
+@Suite(.serialized) struct StorageAndScaleTests {
     private let legacy = """
     {"schemaVersion":1,"projects":[{"id":"p","name":"legacy","importance":3}],"nodes":[{"id":"n","projectID":"p","name":"legacy node"}],"items":[{"id":"old","name":"old","nodeID":"n","projectIDs":["p"],"remainingMinutes":0,"initialMinutes":60,"energy":"normal","requiresContinuous":false,"status":"completed","started":1799996400000,"completedAt":1800000000000,"needsReview":false},{"id":"waiting","name":"waiting","projectIDs":["p"],"remainingMinutes":0,"energy":"normal","requiresContinuous":false,"status":"completed","completedAt":1800000000000,"needsReview":false}],"blockers":[{"id":"b","name":"inactive","state":"inactive"}],"dependencies":[{"id":"b-w","source":{"blocker":{"_0":"b"}},"targetItemID":"waiting"}],"acceptances":[{"id":"g","subject":{"node":{"_0":"n"}},"name":"old gate","state":"accepted","acceptedAt":1800000000000}],"history":[],"decisions":[],"workSessions":[]}
     """

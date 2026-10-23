@@ -329,3 +329,197 @@ private enum TemplateFixture {
     #expect(roundTrip.projectTemplate(id: id)?.canInstantiate == false)
     #expect(roundTrip.projectTemplate(id: id)?.availabilityIssue == "Unresolved content conflict")
 }
+
+private let fixNow = Date(timeIntervalSince1970: 1_800_000_000)
+private func fixWorkspace() -> Workspace {
+    Workspace(projects: [Project(id: "p", name: "Source")],
+        items: [WorkItem(id: "i", name: "Deliver", projectIDs: ["p"], remainingMinutes: 30),
+                WorkItem(id: "candidate", name: "Repair", projectIDs: ["p"], remainingMinutes: 15)],
+        blockers: [Blocker(id: "b", name: "Approval", resolutionCondition: "Signed", expectedDurationMinutes: 60)],
+        acceptances: [Acceptance(id: "a", subject: .item("i"), name: "Quality", state: .accepted, acceptedAt: fixNow,
+                                candidateItemIDs: ["candidate"], candidateBlockerIDs: ["b"])])
+}
+@Test func fixTemplateCandidatesRemapAndPersistAcrossStorage() throws {
+    var w = fixWorkspace(); try w.validate()
+    let id = try w.saveProjectTemplate(projectID: "p", title: "Candidates", now: fixNow)
+    let payload = try #require(w.projectTemplate(id: id)?.payload)
+    let gate = try #require(payload.acceptances.first)
+    #expect(gate.candidateItemIDs == [payload.items.first { $0.name == "Repair" }!.id])
+    #expect(gate.candidateBlockerIDs == [payload.blockers.first!.id])
+    #expect(Set(["b", "candidate"]).isDisjoint(with: Set((gate.candidateItemIDs ?? []) + (gate.candidateBlockerIDs ?? []))))
+    let project = try w.instantiateProjectTemplate(templateID: id, deadline: fixNow, timeZoneID: "UTC", dateOnly: false, now: fixNow)
+    let copied = w.items.filter { $0.projectIDs == [project] }
+    let acceptance = try #require(w.acceptances.first { $0.subject == .item(copied.first { $0.name == "Deliver" }!.id) })
+    #expect(acceptance.state == .pending && acceptance.acceptedAt == nil && acceptance.currentRound == 1)
+    #expect(acceptance.candidateItemIDs == [copied.first { $0.name == "Repair" }!.id])
+    let blockerID = try #require(acceptance.candidateBlockerIDs?.first)
+    #expect(blockerID != "b" && blockerID != payload.blockers.first?.id)
+    #expect(w.blockers.first { $0.id == blockerID }?.resolutionCondition == "Signed")
+    let stored = try persistedCopy(w)
+    #expect(stored == w)
+    #expect(stored.projectTemplate(id: id)?.payload == payload)
+    #expect(stored.acceptances.first { $0.id == acceptance.id }?.candidateItemIDs == acceptance.candidateItemIDs)
+    #expect(stored.acceptances.first { $0.id == acceptance.id }?.candidateBlockerIDs == acceptance.candidateBlockerIDs)
+}
+@Test func fixTemplateExternalAndExcludedCandidatesBlockAtomicallyWithReadableNames() throws {
+    for excluded in [false, true] {
+        var w = fixWorkspace()
+        if excluded { w.items[1].isArchived = true } else {
+            w.projects.append(Project(id: "foreign", name: "Foreign")); w.items[1].projectIDs = ["foreign"]
+        }
+        let before = w, preview = w.previewProjectTemplate(projectID: "p")
+        #expect(!preview.canSave && preview.payload == nil)
+        #expect(preview.errors.contains { $0.message.contains("Quality") && $0.message.contains("Repair") })
+        #expect(throws: CoreError.self) { try w.saveProjectTemplate(projectID: "p", title: "Blocked", now: fixNow) }
+        #expect(w == before)
+    }
+    var w = fixWorkspace(); w.blockers[0].isArchived = true
+    #expect(w.previewProjectTemplate(projectID: "p").errors.contains { $0.code == .missingBlocker })
+}
+@Test func fixTemplateLegacyAcceptanceDecodeAndMalformedCandidatesStayIsolated() throws {
+    let data = Data(#"{"id":"old","subject":{"item":{"_0":"i"}},"name":"Legacy"}"#.utf8)
+    let gate = try JSONDecoder().decode(ProjectTemplateAcceptance.self, from: data)
+    #expect(gate.candidateItemIDs == nil && gate.candidateBlockerIDs == nil)
+    let p = ProjectTemplateProject(id: "p", name: "Bad")
+    let work = ProjectTemplateWork(id: "i", name: "I", durationMinutes: 1, structureOrder: 1)
+    for candidates in [["missing"], ["i", "i"]] {
+        let payload = ProjectTemplatePayload(project: p, items: [work], acceptances: [.init(subject: .item("i"), name: "Gate", candidateItemIDs: candidates)])
+        #expect(throws: CoreError.self) { try payload.validate() }
+        let template = ProjectTemplate(title: "Bad", payload: payload)
+        var w = Workspace(projectTemplates: [template]); try w.validate()
+        let before = w
+        #expect(throws: CoreError.self) { try w.instantiateProjectTemplate(templateID: template.id, deadline: fixNow, timeZoneID: "UTC", dateOnly: false, now: fixNow) }
+        #expect(w == before)
+    }
+}
+
+/// Measures the corrected defaults-first command boundary, including candidate configuration.
+/// Timing has no brittle absolute limit; topology, ID isolation and static configuration are checked.
+@Test func fixTemplatePreparationScaleSamples() throws {
+    let clock = ContinuousClock()
+    func ms(_ start: ContinuousClock.Instant) -> Double {
+        let c = start.duration(to: clock.now).components
+        return Double(c.seconds) * 1000 + Double(c.attoseconds) / 1e15
+    }
+    for count in [1500, 6000] {
+        for sample in 1...3 {
+            var w = Workspace(projects: [Project(id: "p", name: "Scale", deadline: fixNow), Project(id: "other", name: "Other")])
+            w.nodes = (0..<(count / 100)).map { Node(id: "n\($0)", projectID: "p", name: "Node \($0)") }
+            w.items = (0..<count).map { WorkItem(id: "i\($0)", name: "Work \($0)", nodeID: "n\($0 / 100)", projectIDs: ["p"], remainingMinutes: 2) }
+            w.items += (0..<2000).map { WorkItem(id: "other\($0)", name: "Other \($0)", projectIDs: ["other"], remainingMinutes: 1) }
+            w.dependencies = (0..<count).filter { $0 % 100 != 0 }.map { Dependency(source: .item("i\($0 - 1)"), targetItemID: "i\($0)") }
+            w.blockers = [Blocker(id: "b", name: "Approval", expectedDurationMinutes: 60)]
+            w.acceptances = (0..<(count / 100)).map { Acceptance(subject: .node("n\($0)"), name: "Quality \($0)", candidateItemIDs: ["i\($0 * 100)"], candidateBlockerIDs: ["b"]) }
+            let saveStart = clock.now
+            try w.applyDefaultRemainingEstimates(now: fixNow)
+            let templateID = try w.saveProjectTemplate(projectID: "p", title: "Scale", now: fixNow)
+            let saveMS = ms(saveStart)
+            let defaultsStart = clock.now
+            try w.applyDefaultRemainingEstimates(now: fixNow)
+            let defaultsMS = ms(defaultsStart), commandStart = clock.now
+            let projectID = try w.instantiateProjectTemplate(templateID: templateID, deadline: fixNow.addingTimeInterval(86400), timeZoneID: "UTC", dateOnly: false, now: fixNow)
+            let createMS = ms(commandStart)
+            let items = w.items.filter { $0.projectIDs == [projectID] }, ids = Set(items.map(\.id))
+            let nodeIDs = Set(w.nodes.filter { $0.projectID == projectID }.map(\.id))
+            let gates = w.acceptances.filter { if case .node(let id) = $0.subject { return nodeIDs.contains(id) }; return false }
+            #expect(items.count == count && w.dependencies.filter { ids.contains($0.targetItemID) }.count == count - count / 100)
+            #expect(gates.count == count / 100 && gates.allSatisfy { $0.state == .pending && ($0.candidateItemIDs ?? []).allSatisfy(ids.contains) })
+            let blockerIDs = Set(gates.flatMap { $0.candidateBlockerIDs ?? [] })
+            #expect(blockerIDs.count == 1 && !blockerIDs.contains("b"))
+            #expect(w.blockers.first { blockerIDs.contains($0.id) }?.expectedDurationMinutes == 60)
+            print(String(format: "TEMPLATE_FIX_PERF works=%d unrelated=2000 gates=%d sample=%d save_prepare_ms=%.3f defaults_ms=%.3f create_command_ms=%.3f total_prepare_ms=%.3f", count, gates.count, sample, saveMS, defaultsMS, createMS, defaultsMS + createMS))
+        }
+    }
+}
+
+@Test func independentTemplatePerformanceSamples() throws {
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    let clock = ContinuousClock()
+    func ms(_ start: ContinuousClock.Instant) -> Double {
+        let c = start.duration(to: clock.now).components
+        return Double(c.seconds) * 1000 + Double(c.attoseconds) / 1e15
+    }
+    func progress(_ phase: String, _ count: Int, _ sample: Int) {
+        let data = Data("TEMPLATE_INDEPENDENT_PERF works=\(count) sample=\(sample) phase=\(phase)\n".utf8)
+        FileHandle.standardOutput.write(data)
+        if let path = ProcessInfo.processInfo.environment["CUBIC_QA_PROGRESS_FILE"], let handle = FileHandle(forWritingAtPath: path) {
+            defer { try? handle.close() }; handle.seekToEndOfFile(); handle.write(data)
+        }
+    }
+    for count in [1500, 6000] {
+        for sample in 1...3 {
+            var w = Workspace(projects: [Project(id: "p", name: "Scale", deadline: now), Project(id: "other", name: "Unrelated")])
+            w.nodes = (0..<(count / 100)).map { Node(id: "n\($0)", projectID: "p", name: "Node \($0)") }
+            w.items = (0..<count).map { WorkItem(id: "i\($0)", name: "Work \($0)", nodeID: "n\($0 / 100)", projectIDs: ["p"], remainingMinutes: 2) }
+            w.items += (0..<2000).map { WorkItem(id: "other\($0)", name: "Unrelated \($0)", projectIDs: ["other"], remainingMinutes: 1) }
+            w.dependencies = (0..<count).filter { $0 % 100 != 0 }.map { Dependency(source: .item("i\($0 - 1)"), targetItemID: "i\($0)") }
+            progress("preview", count, sample)
+            let startPreview = clock.now
+            let preview = w.previewProjectTemplate(projectID: "p")
+            let previewMS = ms(startPreview)
+            #expect(preview.canSave && preview.payload?.items.count == count)
+            progress("save", count, sample)
+            let startSave = clock.now
+            let id = try w.saveProjectTemplate(projectID: "p", title: "Scale", now: now)
+            let saveMS = ms(startSave)
+            progress("create", count, sample)
+            let startCreate = clock.now
+            let created = try w.instantiateProjectTemplate(templateID: id, deadline: now.addingTimeInterval(86400), timeZoneID: "Asia/Singapore", dateOnly: true, now: now)
+            let createMS = ms(startCreate)
+            let copied = w.items.filter { $0.projectIDs == [created] }
+            let copiedIDs = Set(copied.map(\.id))
+            #expect(copied.count == count)
+            #expect(w.dependencies.filter { copiedIDs.contains($0.targetItemID) }.count == count - count / 100)
+            #expect(w.history.count == count + count / 100 + 1 + count - count / 100)
+            progress("boundary", count, sample)
+            let boundaryStart = clock.now
+            try w.applyDefaultRemainingEstimates(now: now)
+            try w.validate()
+            let boundaryMS = ms(boundaryStart)
+            progress("encode", count, sample)
+            let encodeStart = clock.now
+            let bytes = try JSONEncoder().encode(w)
+            let encodeMS = ms(encodeStart)
+            progress("storage", count, sample)
+            let persistStart = clock.now
+            let stored = try persistedCopy(w)
+            #expect(stored.items == w.items && stored.projectTemplates == w.projectTemplates)
+            let persistMS = ms(persistStart)
+            print(String(format: "TEMPLATE_INDEPENDENT_PERF mode=debug/macOS works=%d unrelated=2000 sample=%d preview_ms=%.3f save_ms=%.3f create_ms=%.3f app_boundary_ms=%.3f encode_ms=%.3f storage_ms=%.3f bytes=%d", count, sample, previewMS, saveMS, createMS, boundaryMS, encodeMS, persistMS, bytes.count))
+        }
+    }
+}
+
+@Test func independentAcceptanceStaticWaitingRulesMustSurviveTemplate() throws {
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    var w = Workspace(projects: [Project(id: "p", name: "Approval")],
+        items: [WorkItem(id: "i", name: "Deliver", projectIDs: ["p"], remainingMinutes: 30)],
+        blockers: [Blocker(id: "b", name: "Await approval", resolutionCondition: "Signed", expectedDurationMinutes: 60)],
+        acceptances: [Acceptance(id: "a", subject: .item("i"), name: "Quality pass", candidateBlockerIDs: ["b"])])
+    try w.validate()
+    let preview = w.previewProjectTemplate(projectID: "p")
+    #expect(preview.canSave)
+    #expect(preview.payload?.blockers.count == 1, "The saved acceptance's static waiting rule must include its blocker definition")
+    let id = try w.saveProjectTemplate(projectID: "p", title: "Approval", now: now)
+    let created = try w.instantiateProjectTemplate(templateID: id, deadline: now, timeZoneID: "UTC", dateOnly: false, now: now)
+    let copied = try #require(w.items.first { $0.projectIDs == [created] })
+    let acceptance = try #require(w.acceptances.first { $0.subject == .item(copied.id) })
+    #expect(acceptance.candidateBlockerIDs?.count == 1, "Only execution state should reset; the configured waiting candidates must remap")
+    print("TEMPLATE_ACCEPTANCE_PROBE source_candidates=\(w.acceptances[0].candidateBlockerIDs ?? []) preview_blockers=\(preview.payload?.blockers.count ?? -1) copied_candidates=\(acceptance.candidateBlockerIDs ?? [])")
+}
+
+@Test func independentDateOnlyStorageRoundTripDiagnostic() throws {
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    var w = Workspace(projects: [Project(id: "p", name: "Precision")], items: [WorkItem(id: "i", name: "Work", projectIDs: ["p"], remainingMinutes: 2)])
+    let id = try w.saveProjectTemplate(projectID: "p", title: "Precision", now: now)
+    let created = try w.instantiateProjectTemplate(templateID: id, deadline: now, timeZoneID: "Asia/Singapore", dateOnly: true, now: now)
+    let loaded = try persistedCopy(w)
+    let a = try #require(w.projects.first { $0.id == created }?.deadline)
+    let b = try #require(loaded.projects.first { $0.id == created }?.deadline)
+    let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .millisecondsSince1970; encoder.outputFormatting = [.sortedKeys]
+    let originalJSON = try encoder.encode(w), loadedJSON = try encoder.encode(loaded)
+    print("TEMPLATE_STORAGE_PRECISION exact_equal=\(loaded == w) canonical_json_equal=\(originalJSON == loadedJSON) deadline_delta_seconds=\(b.timeIntervalSince(a)) templates_equal=\(loaded.projectTemplates == w.projectTemplates) items_equal=\(loaded.items == w.items) history_equal=\(loaded.history == w.history)")
+    #expect(originalJSON == loadedJSON)
+    #expect(abs(b.timeIntervalSince(a)) < 0.001)
+    #expect(loaded.items == w.items && loaded.projectTemplates == w.projectTemplates)
+}
