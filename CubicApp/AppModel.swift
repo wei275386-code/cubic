@@ -38,7 +38,6 @@ import CubicCore
     private(set) var certificateGroups: [PlanningDisplay.CertificateGroup] = []
     var notices: [RiskNotice] = []
     /// 旧数据重新解释的一次性提示；确认后写偏好并不再显示。
-    var acceptanceNotice: String?
     var openingNoticeID: String?
     var calendarBridge: CalendarBridge?
     private var calendarBridgeGeneration = 0
@@ -198,10 +197,6 @@ import CubicCore
             if Self.workCalendarQAMode, Self.resetWorkCalendarQA || opened.isNew {
                 document = try await opened.save(workspace: Self.workCalendarQAWorkspace(now: date))
             }
-            if !Self.workCalendarQAMode, !opened.isNew, preferences.acceptanceNoticeAcknowledged != true,
-               document.workspace.needsAcceptanceReinterpretationNotice {
-                acceptanceNotice = "验收规则已更新：没有添加验收条件的节点，在必需工作完成后即视为验收通过；以前标记为“非必需”的验收条件现在按必需处理。"
-            }
             if !Self.workCalendarQAMode, preferences.workTimeZoneID == nil { preferences.workTimeZoneID = TimeZone.current.identifier; preferences.save() }
             if !Self.workCalendarQAMode, opened.isNew {
                 preferences.workTimeZoneID = TimeZone.current.identifier
@@ -228,11 +223,6 @@ import CubicCore
     }
     func retryLoad() async { loaded = false; loading = true; loadFailure = nil; await boot() }
     func item(_ id: String) -> WorkItem? { workspace.items.first { $0.id == id } }
-    func acknowledgeAcceptanceNotice() {
-        acceptanceNotice = nil
-        preferences.acceptanceNoticeAcknowledged = true
-        preferences.save()
-    }
     func enterMessagePage(_ id: UUID) {
         guard !messagePages.contains(id) else { return }
         messagePages.append(id)
@@ -474,7 +464,7 @@ import CubicCore
     }
     private func markMissingCalendar(_ result: inout EngineSnapshot) {
         var reasons: [String] = []
-        if !preferences.hasDeclaredWorkSchedule { reasons.append("工作时段尚未保存，请到设置调整并保存。") }
+        if !preferences.workScheduleConfigured { reasons.append("工作时段尚未保存，请到设置调整并保存。") }
         if !preferences.calendarEnabled {
             reasons.append("尚未启用日历，目前只按手动工作时段计算空档。")
         } else if !calendar.authorized {
@@ -741,7 +731,7 @@ import CubicCore
             Self.buildCalculationInput(workspace: original, preferences: settings, calendar: external, date: Date()).slots
         }.value
         return CalendarBridgeContext(workspace: original, slots: slots, externalBusy: [],
-            capacityVerified: version == calendarIntegrationSourceVersion && generation == calendarBridgeGeneration && calendarStorageReady && settings.hasDeclaredWorkSchedule &&
+            capacityVerified: version == calendarIntegrationSourceVersion && generation == calendarBridgeGeneration && calendarStorageReady && settings.workScheduleConfigured &&
                 (!settings.calendarEnabled || (external.authorized && external.missingCalendarIDs.isEmpty && external.fetchedAt.map { Date().timeIntervalSince($0) < 300 } == true)),
             storageReady: calendarStorageReady, sourceRevision: version)
     }
@@ -975,7 +965,7 @@ import CubicCore
         }.value
     }
     nonisolated private static func buildCalculationInput(workspace: Workspace, preferences: UserPreferences, calendar: CalendarSnapshot, date: Date) -> (workspace: Workspace, slots: [CapacitySlot]) {
-        guard preferences.hasDeclaredWorkSchedule else { return (workspace, []) }
+        guard preferences.workScheduleConfigured else { return (workspace, []) }
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = preferences.workTimeZone
         let end = planningHorizon(workspace: workspace, date: date)
@@ -994,7 +984,7 @@ import CubicCore
             let dayBusy = busy.filter { $0.end > day && $0.start < nextDay }
             let canWork = override.map { !$0.unavailable } ?? (preferences.workWeekends || !cal.isDateInWeekend(day))
             if canWork {
-                let periods = override?.periods ?? preferences.effectiveWorkPeriods
+                let periods = override?.periods ?? preferences.workPeriods
                 for period in periods {
                     guard let rawStart = cal.date(bySettingHour: period.startMinute / 60, minute: period.startMinute % 60, second: 0, of: day),
                           let rawEnd = period.endMinute == 1440 ? nextDay : cal.date(bySettingHour: period.endMinute / 60, minute: period.endMinute % 60, second: 0, of: day) else { continue }

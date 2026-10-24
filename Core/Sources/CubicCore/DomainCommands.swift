@@ -134,12 +134,8 @@ extension Workspace {
                   acceptance.reworkScopeConfirmed == old.reworkScopeConfirmed, acceptance.removedAt == nil else {
                 throw CoreError.invalid("验收事实需专用命令")
             }
-            var value = acceptance
-            // 旧“非必需”字段静默迁移为必需：语义已统一，不构成范围变化，不 reopen 整个 subject。
-            if (value.isRequired ?? true) == false { value.isRequired = true }
-            draft.acceptances[index] = value
-            let nameChanged = old.name != value.name
-            if nameChanged {
+            draft.acceptances[index] = acceptance
+            if old.name != acceptance.name {
                 draft.preserveAcceptance(index, now: now)
                 switch old.subject {
                 case .node(let id): draft.reopenNodeResult(id, now: now); draft.invalidateDownstream(of: [.node(id)], now: now)
@@ -150,9 +146,8 @@ extension Workspace {
                     }
                 }
             }
-            // required 已恒为必需，验收编辑一律记为 .acceptanceChanged（保留“编辑验收”文案）。
             draft.appendHistory(.acceptanceChanged,
-                                id: value.id, now: now, note: note, detail: try domainChangeDetail(old, value))
+                                id: acceptance.id, now: now, note: note, detail: try domainChangeDetail(old, acceptance))
         }
     }
     public mutating func updateDependency(_ dependency: Dependency, now: Date, note: String = "") throws {

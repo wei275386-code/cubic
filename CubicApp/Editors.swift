@@ -606,7 +606,7 @@ struct CubicAcceptanceEditor: View {
     }
     private func save() async -> Bool {
         var value = acceptance ?? Acceptance(subject: subject, name: ProjectUI.trim(name))
-        value.name = ProjectUI.trim(name); value.isRequired = true; value.candidateBlockerIDs = blockerIDs.sorted()
+        value.name = ProjectUI.trim(name); value.candidateBlockerIDs = blockerIDs.sorted()
         let savedValue = value
         return await model.mutate { if acceptance == nil { try $0.addAcceptance(savedValue, now: Date()) } else { try $0.updateAcceptance(savedValue, now: Date()) } }
     }

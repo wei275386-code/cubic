@@ -416,7 +416,7 @@ extension Workspace {
             return Dependency(id: ids[dependency.id]!, source: source, targetItemID: ids[dependency.targetItemID]!, createdAt: now, effectiveAt: now, revision: 1)
         }
         let newAcceptances = payload.acceptances.map {
-            Acceptance(id: ids[$0.id]!, subject: remap($0.subject), name: $0.name, state: .pending, isRequired: true,
+            Acceptance(id: ids[$0.id]!, subject: remap($0.subject), name: $0.name, state: .pending,
                        candidateItemIDs: $0.candidateItemIDs.map { $0.map { ids[$0]! } },
                        candidateBlockerIDs: $0.candidateBlockerIDs.map { $0.map { ids[$0]! } }, round: 1)
         }
