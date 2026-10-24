@@ -99,13 +99,8 @@ struct CalendarView: View {
                         }.padding(.vertical, 6)
                     }
                 }
-                if model.preferences.demoCapacityStart != nil {
-                    Text(model.preferences.demoScenarioVersion == 2 ? "示例提供两天共 4 小时。到设置中保存工作时段后，改用你的可用时间。" : "示例提供 90 分钟。到设置中保存工作时段后，改用你的可用时间。")
-                        .font(.caption).foregroundStyle(.secondary)
-                } else {
-                    Text("空档由工作时段减去日历占用计算。可到设置调整每天的工作时间。")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
+                Text("空档由工作时段减去日历占用计算。可到设置调整每天的工作时间。")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("Apple 日历占用") {
                 if !model.preferences.calendarEnabled && model.calendarBridge?.enabled != true {

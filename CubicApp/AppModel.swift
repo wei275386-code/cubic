@@ -204,8 +204,6 @@ import CubicCore
             }
             if !Self.workCalendarQAMode, preferences.workTimeZoneID == nil { preferences.workTimeZoneID = TimeZone.current.identifier; preferences.save() }
             if !Self.workCalendarQAMode, opened.isNew {
-                preferences.demoCapacityStart = nil
-                preferences.demoScenarioVersion = nil
                 preferences.workTimeZoneID = TimeZone.current.identifier
                 preferences.save()
             }
@@ -476,7 +474,6 @@ import CubicCore
     }
     private func markMissingCalendar(_ result: inout EngineSnapshot) {
         var reasons: [String] = []
-        if preferences.demoCapacityStart == nil {
         if !preferences.hasDeclaredWorkSchedule { reasons.append("工作时段尚未保存，请到设置调整并保存。") }
         if !preferences.calendarEnabled {
             reasons.append("尚未启用日历，目前只按手动工作时段计算空档。")
@@ -489,7 +486,6 @@ import CubicCore
             let rule = preferences.rule(for: event.calendarID)
             return (event.allDay && rule.allDay == .uncertain) || (!event.availabilityKnown && rule.unknownAvailability == .uncertain)
         }) { reasons.append("所选来源存在未确认的全天或忙闲规则，已保守计入占用；请在设置确认。") }
-        }
         if let bridge = calendarBridge, bridge.enabled {
             if !bridge.pausedBlockIDs.isEmpty { reasons.append("Apple Calendar 时间块尚未核实，待确认时间块不参与条件性未来进展。") }
             if !bridge.status.authorized { reasons.append("Apple Calendar 双向同步权限不可用，外部占用未核实。") }
@@ -510,7 +506,6 @@ import CubicCore
             var candidate = value
             candidate.workScheduleConfigured = true
             candidate.workTimeZoneID = value.workTimeZoneID ?? TimeZone.current.identifier
-            candidate.demoCapacityStart = nil
             guard let store else { throw CoreError.invalid("本机保存服务尚未准备好，请稍后再保存设置。") }
             let document = try await store.save(preferences: candidate.syncValues(calendars: calendar.calendars))
             preferences = candidate
@@ -746,7 +741,7 @@ import CubicCore
             Self.buildCalculationInput(workspace: original, preferences: settings, calendar: external, date: Date()).slots
         }.value
         return CalendarBridgeContext(workspace: original, slots: slots, externalBusy: [],
-            capacityVerified: version == calendarIntegrationSourceVersion && generation == calendarBridgeGeneration && calendarStorageReady && (settings.hasDeclaredWorkSchedule || settings.demoCapacityStart != nil) &&
+            capacityVerified: version == calendarIntegrationSourceVersion && generation == calendarBridgeGeneration && calendarStorageReady && settings.hasDeclaredWorkSchedule &&
                 (!settings.calendarEnabled || (external.authorized && external.missingCalendarIDs.isEmpty && external.fetchedAt.map { Date().timeIntervalSince($0) < 300 } == true)),
             storageReady: calendarStorageReady, sourceRevision: version)
     }
@@ -960,35 +955,9 @@ import CubicCore
             return false
         }
     }
-    func renewDemoWindow() async {
-        guard preferences.demoCapacityStart != nil else { return }
-        let date = Date()
-        if preferences.demoScenarioVersion == 2 {
-            var calendar = Calendar(identifier: .gregorian)
-            calendar.timeZone = preferences.workTimeZone
-            let today = calendar.date(bySettingHour: 14, minute: 0, second: 0, of: date)!
-            let start = date <= today ? today : calendar.date(byAdding: .day, value: 1, to: today)!
-            let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: start))!
-            let end = calendar.date(bySettingHour: 12, minute: 0, second: 0, of: tomorrow)!
-            let zone = preferences.workTimeZone.identifier
-            let changed = await mutate { workspace in
-                for id in ["project-a", "project-b", "project-c"] where workspace.projects.contains(where: { $0.id == id }) {
-                    try workspace.setProjectDeadline(id: id, deadline: id == "project-b" ? start.addingTimeInterval(120 * 60) : end, timeZoneID: zone, now: date)
-                }
-            }
-            if changed { preferences.demoCapacityStart = start; preferences.save(); await refresh() }
-        } else {
-            let changed = await mutate { workspace in
-                for id in ["project-a", "project-b", "project-c"] where workspace.projects.contains(where: { $0.id == id }) {
-                    try workspace.setProjectDeadline(id: id, deadline: date.addingTimeInterval(90 * 60), timeZoneID: nil, now: date)
-                }
-            }
-            if changed { preferences.demoCapacityStart = date; preferences.save(); await refresh() }
-        }
-    }
     func resetWorkspace() async -> Bool {
         let success = await mutate { try $0.archiveCurrentWorkspace(now: Date()) }
-        if success { preferences.demoCapacityStart = nil; preferences.save(); await refresh() }
+        if success { await refresh() }
         return success
     }
     private func horizon(from date: Date) -> Date { Self.planningHorizon(workspace: workspace, date: date) }
@@ -1006,19 +975,6 @@ import CubicCore
         }.value
     }
     nonisolated private static func buildCalculationInput(workspace: Workspace, preferences: UserPreferences, calendar: CalendarSnapshot, date: Date) -> (workspace: Workspace, slots: [CapacitySlot]) {
-        if let start = preferences.demoCapacityStart {
-            if preferences.demoScenarioVersion == 2 {
-                var calendar = Calendar(identifier: .gregorian)
-                calendar.timeZone = preferences.workTimeZone
-                let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: start))!
-                let secondStart = calendar.date(bySettingHour: 10, minute: 0, second: 0, of: tomorrow)!
-                let raw = [CapacitySlot(start: start, end: start.addingTimeInterval(120 * 60)),
-                           CapacitySlot(start: secondStart, end: secondStart.addingTimeInterval(120 * 60))]
-                return (workspace, raw.filter { $0.end > date }.map { CapacitySlot(start: max(date, $0.start), end: $0.end, energy: $0.energy) })
-            }
-            let end = start.addingTimeInterval(90 * 60)
-            return (workspace, date < end ? [CapacitySlot(start: max(start, date), end: end)] : [])
-        }
         guard preferences.hasDeclaredWorkSchedule else { return (workspace, []) }
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = preferences.workTimeZone
