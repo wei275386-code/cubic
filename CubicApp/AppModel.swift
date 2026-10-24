@@ -161,10 +161,19 @@ import CubicCore
         value.calendarEnabled = false
         value.workScheduleConfigured = true
         value.workTimeZoneID = TimeZone.current.identifier
-        value.demoCapacityStart = now.addingTimeInterval(5 * 60)
-        value.demoScenarioVersion = nil
-        value.workPeriods = [WorkPeriod(id: "qa-all-day", startMinute: 0, endMinute: 24 * 60, energy: "normal")]
+        value.workPeriods = []
+        value.dayOverrides = workCalendarQAAvailability(start: now.addingTimeInterval(5 * 60), minutes: 90, preferences: value)
         return value
+    }
+    private static func workCalendarQAAvailability(start: Date, minutes: Int, preferences: UserPreferences) -> [DayAvailabilityOverride] {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = preferences.workTimeZone
+        let start = Date(timeIntervalSince1970: (start.timeIntervalSince1970 / 60).rounded(.up) * 60)
+        let today = calendar.startOfDay(for: start), tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
+        let startMinute = Int(start.timeIntervalSince(today) / 60), endMinute = startMinute + minutes
+        let first = DayAvailabilityOverride(id: preferences.dateKey(today), periods: [WorkPeriod(id: "qa-today", startMinute: startMinute, endMinute: min(endMinute, 24 * 60))])
+        guard endMinute > 24 * 60 else { return [first] }
+        return [first, DayAvailabilityOverride(id: preferences.dateKey(tomorrow), periods: [WorkPeriod(id: "qa-tomorrow", startMinute: 0, endMinute: endMinute - 24 * 60)])]
     }
     private static func workCalendarQAWorkspace(now: Date) -> Workspace {
         let start = now.addingTimeInterval(5 * 60)
