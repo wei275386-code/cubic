@@ -96,8 +96,6 @@ struct UserPreferences: Codable, Sendable, Equatable {
     func allowsReminder(kind: String) -> Bool {
         remindersEnabled && !(disabledReminderCategories ?? []).contains(ReminderCategory.category(for: kind).rawValue)
     }
-    var demoCapacityStart: Date?
-    var demoScenarioVersion: Int?
     var workTimeZoneID: String?
     var workScheduleConfigured: Bool?
     var workPeriods: [WorkPeriod]?
@@ -163,7 +161,7 @@ struct UserPreferences: Codable, Sendable, Equatable {
             result.workStartHour = schedule.workStartHour; result.workEndHour = schedule.workEndHour
             result.workWeekends = schedule.workWeekends; result.slotEnergy = schedule.slotEnergy
             result.workTimeZoneID = schedule.workTimeZoneID; result.workScheduleConfigured = schedule.workScheduleConfigured
-            result.workPeriods = schedule.workPeriods; result.demoCapacityStart = nil
+            result.workPeriods = schedule.workPeriods
         }
         if let field = fields["dayOverrides"] { result.dayOverrides = try decode([DayAvailabilityOverride].self, field) }
         if let field = fields["calendarEnabled"] { result.calendarEnabled = try decode(Bool.self, field) }
