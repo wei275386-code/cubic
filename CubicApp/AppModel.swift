@@ -37,7 +37,6 @@ import CubicCore
     private(set) var latestStartSuggestions: [PlanningDisplay.LatestStartSuggestion] = []
     private(set) var certificateGroups: [PlanningDisplay.CertificateGroup] = []
     var notices: [RiskNotice] = []
-    /// 旧数据重新解释的一次性提示；确认后写偏好并不再显示。
     var openingNoticeID: String?
     var calendarBridge: CalendarBridge?
     private var calendarBridgeGeneration = 0
