@@ -116,6 +116,25 @@ import Testing
         #expect(merged.workspace.nodes.first { $0.id == "n2" }?.name == "Renamed", "intent: rename kept")
     }
 
+    /// Two stores syncing at the same moment must not both upload over the common version.
+    @Test func simultaneousSyncsKeepBothEdits() async throws {
+        let base = try projectBase()
+        for _ in 0..<20 {
+            let p = try await pair(base); defer { try? FileManager.default.removeItem(at: p.root) }
+            var mine = base, theirs = base
+            try mine.addItem(WorkItem(id: "a", name: "A", projectIDs: ["p"], remainingMinutes: 30), now: at(10))
+            try theirs.addItem(WorkItem(id: "b", name: "B", projectIDs: ["p"], remainingMinutes: 30), now: at(10))
+            try await p.mac.save(workspace: mine, now: at(100))
+            try await p.phone.save(workspace: theirs, now: at(200))
+            async let macSync = p.mac.sync(folder: p.folder)
+            async let phoneSync = p.phone.sync(folder: p.folder)
+            _ = try await (macSync, phoneSync)
+            try await settle(p)
+            let merged = try await expectConverged(p)
+            #expect(Set(merged.workspace.items.map(\.id)).isSuperset(of: ["a", "b"]))
+        }
+    }
+
     @Test(arguments: [true, false]) func bothReorderSameProjectDifferently(macNewer: Bool) async throws {
         let base = try projectBase()
         let p = try await pair(base); defer { try? FileManager.default.removeItem(at: p.root) }

@@ -84,13 +84,8 @@ public actor WorkspaceStore {
     /// Connects a folder for the first time. Any copy that gets replaced is kept in the folder.
     /// The caller must hold security-scoped access to `folder`.
     public func connect(folder: URL, start: FolderSyncStart) throws -> FolderSyncOutcome {
-        switch try readRemote(folder) {
-        case .downloading:
-            throw CoreError.blocked("同步目录中的 Cubic 数据还在从 iCloud 下载，请稍后再连接。")
-        case .missing:
-            try upload(to: folder)
-            return .uploaded
-        case .document(let remote):
+        let outcome = try withFolderFile(folder) { remote, upload -> FolderSyncOutcome in
+            guard let remote else { try upload(); return .uploaded }
             if remote.version == local.document.version { try markSynced(remote.version); return .unchanged }
             switch start {
             case .useFolder:
@@ -99,10 +94,12 @@ public actor WorkspaceStore {
                 return .downloaded
             case .useThisDevice:
                 try backup(remote, in: folder)
-                try upload(to: folder)
+                try upload()
                 return .uploaded
             }
         }
+        guard let outcome else { throw CoreError.blocked("同步目录中的 Cubic 数据还在从 iCloud 下载，请稍后再连接。") }
+        return outcome
     }
 
     public func disconnect() throws {
@@ -114,36 +111,33 @@ public actor WorkspaceStore {
 
     /// Exchanges changes with a connected folder. The caller must hold security-scoped access to `folder`.
     public func sync(folder: URL) throws -> FolderSyncOutcome {
-        let remote: WorkspaceDocument
-        switch try readRemote(folder) {
-        case .downloading: return .waitingForDownload
-        case .missing: try upload(to: folder); return .uploaded
-        case .document(let value): remote = value
-        }
-        if remote.version == local.document.version {
-            if local.syncedVersion != remote.version { try markSynced(remote.version) }
-            return .unchanged
-        }
-        let localChanged = local.document.version != local.syncedVersion
-        let remoteChanged = remote.version != local.syncedVersion
-        switch (localChanged, remoteChanged) {
-        case (false, false): return .unchanged
-        case (true, false): try upload(to: folder); return .uploaded
-        case (false, true): try adopt(remote); return .downloaded
-        case (true, true):
-            let mine = local.document
-            let keepMine = (mine.savedAt, mine.deviceID) > (remote.savedAt, remote.deviceID)
-            if let merged = try? mergedDocument(mine, remote, preferLocal: keepMine) {
-                let name = merged.conflicted ? try backup(keepMine ? remote : mine, in: folder) : nil
-                var next = local; next.document = merged.document
-                try write(next)
-                try upload(to: folder)
-                return .merged(backupName: name)
+        try withFolderFile(folder) { remote, upload -> FolderSyncOutcome in
+            guard let remote else { try upload(); return .uploaded }
+            if remote.version == local.document.version {
+                if local.syncedVersion != remote.version { try markSynced(remote.version) }
+                return .unchanged
             }
-            let name = try backup(keepMine ? remote : mine, in: folder)
-            if keepMine { try upload(to: folder) } else { try adopt(remote) }
-            return .conflict(keptThisDevice: keepMine, backupName: name)
-        }
+            let localChanged = local.document.version != local.syncedVersion
+            let remoteChanged = remote.version != local.syncedVersion
+            switch (localChanged, remoteChanged) {
+            case (false, false): return .unchanged
+            case (true, false): try upload(); return .uploaded
+            case (false, true): try adopt(remote); return .downloaded
+            case (true, true):
+                let mine = local.document
+                let keepMine = (mine.savedAt, mine.deviceID) > (remote.savedAt, remote.deviceID)
+                if let merged = try? mergedDocument(mine, remote, preferLocal: keepMine) {
+                    let name = merged.conflicted ? try backup(keepMine ? remote : mine, in: folder) : nil
+                    var next = local; next.document = merged.document
+                    try write(next)
+                    try upload()
+                    return .merged(backupName: name)
+                }
+                let name = try backup(keepMine ? remote : mine, in: folder)
+                if keepMine { try upload() } else { try adopt(remote) }
+                return .conflict(keptThisDevice: keepMine, backupName: name)
+            }
+        } ?? .waitingForDownload
     }
 
     private func mergedDocument(_ mine: WorkspaceDocument, _ remote: WorkspaceDocument, preferLocal: Bool) throws -> (document: WorkspaceDocument, conflicted: Bool) {
@@ -173,11 +167,6 @@ public actor WorkspaceStore {
     private func adopt(_ remote: WorkspaceDocument) throws {
         try write(LocalFile(document: remote, syncedVersion: remote.version, base: remote))
     }
-    private func upload(to folder: URL) throws {
-        let data = try JSONCoding.encode(local.document)
-        try coordinatedWrite(folder.appendingPathComponent(Self.folderFilename)) { try data.write(to: $0, options: .atomic) }
-        try markSynced(local.document.version)
-    }
     @discardableResult
     private func backup(_ document: WorkspaceDocument, in folder: URL) throws -> String {
         let formatter = DateFormatter()
@@ -188,33 +177,43 @@ public actor WorkspaceStore {
         return name
     }
 
-    private enum RemoteState { case missing, downloading, document(WorkspaceDocument) }
-    private func readRemote(_ folder: URL) throws -> RemoteState {
+    /// Reads `Cubic.json`, lets `body` decide, and writes it back within one coordinated access,
+    /// so another device or store cannot replace the file between the read and the upload.
+    /// `body` gets nil when the folder has no Cubic data yet. Returns nil while iCloud is still downloading the file.
+    private func withFolderFile<T: Sendable>(_ folder: URL,
+                                   _ body: (WorkspaceDocument?, _ upload: () throws -> Void) throws -> T) throws -> T? {
         let file = folder.appendingPathComponent(Self.folderFilename)
         // An iCloud file that is not on this device yet appears as a hidden ".Cubic.json.icloud" placeholder.
         let placeholder = folder.appendingPathComponent(".\(Self.folderFilename).icloud")
         if FileManager.default.fileExists(atPath: placeholder.path) {
             try? FileManager.default.startDownloadingUbiquitousItem(at: file)
-            return .downloading
+            return nil
         }
         if let status = try? file.resourceValues(forKeys: [.ubiquitousItemDownloadingStatusKey]).ubiquitousItemDownloadingStatus,
            status != .current {
             try? FileManager.default.startDownloadingUbiquitousItem(at: file)
-            return .downloading
+            return nil
         }
-        var result: Result<RemoteState, any Error>?
+        var result: Result<T, any Error>?
         var coordinationError: NSError?
-        NSFileCoordinator().coordinate(readingItemAt: file, options: [], error: &coordinationError) { url in
+        NSFileCoordinator().coordinate(writingItemAt: file, options: .forMerging, error: &coordinationError) { url in
             result = Result {
-                guard FileManager.default.fileExists(atPath: url.path) else { return .missing }
-                let document = try JSONCoding.decode(WorkspaceDocument.self, from: Data(contentsOf: url))
-                try document.workspace.validate()
-                return .document(document)
+                let remote = try readRemote(url, original: file, folder: folder)
+                return try body(remote) {
+                    try JSONCoding.encode(local.document).write(to: url, options: .atomic)
+                    try markSynced(local.document.version)
+                }
             }
         }
         if let coordinationError { throw coordinationError }
+        return try result!.get()
+    }
+    /// Reads the folder's copy at the coordinated `url`, folding in any iCloud conflict versions of `original`.
+    private func readRemote(_ url: URL, original file: URL, folder: URL) throws -> WorkspaceDocument? {
         do {
-            guard case .document(var remote) = try result!.get() else { return try result!.get() }
+            guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+            var remote = try JSONCoding.decode(WorkspaceDocument.self, from: Data(contentsOf: url))
+            try remote.workspace.validate()
             let versions = NSFileVersion.unresolvedConflictVersionsOfItem(at: file) ?? []
             var handled: [NSFileVersion] = []
             for version in versions {
@@ -231,11 +230,10 @@ public actor WorkspaceStore {
                 handled.append(version)
             }
             if !handled.isEmpty {
-                let data = try JSONCoding.encode(remote)
-                try coordinatedWrite(file) { try data.write(to: $0, options: .atomic) }
+                try JSONCoding.encode(remote).write(to: url, options: .atomic)
                 for version in handled { version.isResolved = true; try? version.remove() }
             }
-            return .document(remote)
+            return remote
         }
         catch let error as CoreError { throw error }
         catch { throw CoreError.blocked("同步目录中的 Cubic.json 无法读取，本机数据未改变。") }
