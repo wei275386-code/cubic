@@ -20,17 +20,6 @@ struct ActionsView: View {
     }
     var body: some View {
         List {
-            if let notice = model.acceptanceNotice {
-                Section {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("验收规则已更新", systemImage: "info.circle")
-                        Text(notice).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                        Button("知道了") { model.acknowledgeAcceptanceNotice() }
-                            .buttonStyle(.bordered).frame(minHeight: 44)
-                            .accessibilityIdentifier("actions.acceptanceNotice.dismiss")
-                    }.padding(.vertical, 4)
-                }
-            }
             if let choice = model.workspace.currentNextAction, let id = choice.itemID, let item = model.item(id) {
                 Section("当前下一步") {
                     NavigationLink { WorkDetailView(itemID: item.id) } label: {

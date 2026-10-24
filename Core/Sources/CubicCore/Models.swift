@@ -200,7 +200,6 @@ public struct Acceptance: Codable, Sendable, Equatable {
     public var name: String
     public var state: AcceptanceState
     public var acceptedAt: Date?
-    public var isRequired: Bool?
     public var failedAt: Date?
     public var reason: String?
     public var candidateItemIDs: [String]?
@@ -210,9 +209,8 @@ public struct Acceptance: Codable, Sendable, Equatable {
     public var removedAt: Date?
     public init(id: String = UUID().uuidString, subject: WorkReference, name: String,
                 state: AcceptanceState = .pending, acceptedAt: Date? = nil,
-                isRequired: Bool? = nil, failedAt: Date? = nil, reason: String? = nil, candidateItemIDs: [String]? = nil, candidateBlockerIDs: [String]? = nil, round: Int? = nil, reworkScopeConfirmed: Bool? = nil, removedAt: Date? = nil) {
+                failedAt: Date? = nil, reason: String? = nil, candidateItemIDs: [String]? = nil, candidateBlockerIDs: [String]? = nil, round: Int? = nil, reworkScopeConfirmed: Bool? = nil, removedAt: Date? = nil) {
         self.id = id; self.subject = subject; self.name = name; self.state = state; self.acceptedAt = acceptedAt
-        self.isRequired = isRequired
         self.failedAt = failedAt
         self.reason = reason
         self.candidateItemIDs = candidateItemIDs

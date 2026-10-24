@@ -5,35 +5,19 @@ struct CapacitySettingsSection: View {
 
     var body: some View {
         Section("工作时间") {
-            if !preferences.hasDeclaredWorkSchedule {
+            if !preferences.workScheduleConfigured {
                 Label("以下是默认时段，请按你的实际情况调整并保存。", systemImage: "questionmark.circle")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            if preferences.workPeriods == nil {
-                Picker("开始", selection: $preferences.workStartHour) {
-                    ForEach(0..<24) { Text(String(format: "%02d:00", $0)).tag($0) }
-                }
-                Picker("结束", selection: $preferences.workEndHour) {
-                    ForEach(1...24, id: \.self) { Text(String(format: "%02d:00", $0)).tag($0) }
-                }
-                Picker("这个时段适合做什么", selection: $preferences.slotEnergy) {
-                    Text("低负荷").tag("low")
-                    Text("普通").tag("normal")
-                    Text("高专注").tag("high")
-                }
-                Button("设置多个工作时段") { preferences.workPeriods = preferences.effectiveWorkPeriods }
-                    .accessibilityIdentifier("capacity.multiplePeriods")
-            } else {
-                ForEach(preferences.workPeriods ?? []) { period in
-                    WorkPeriodFields(period: periodBinding(period.id))
-                    Button("移除这个时段", role: .destructive) {
-                        preferences.workPeriods?.removeAll { $0.id == period.id }
-                    }.accessibilityIdentifier("capacity.remove.\(period.id)")
-                }
-                Button("添加工作时段", systemImage: "plus") {
-                    preferences.workPeriods?.append(WorkPeriod(startMinute: 540, endMinute: 600))
-                }.accessibilityIdentifier("capacity.addPeriod")
+            ForEach(preferences.workPeriods) { period in
+                WorkPeriodFields(period: periodBinding(period.id))
+                Button("移除这个时段", role: .destructive) {
+                    preferences.workPeriods.removeAll { $0.id == period.id }
+                }.accessibilityIdentifier("capacity.remove.\(period.id)")
             }
+            Button("添加工作时段", systemImage: "plus") {
+                preferences.workPeriods.append(WorkPeriod(startMinute: 540, endMinute: 600))
+            }.accessibilityIdentifier("capacity.addPeriod")
             Toggle("周末也可工作", isOn: $preferences.workWeekends)
                 .accessibilityIdentifier("capacity.weekends")
             TextField("工作时区，例如 Asia/Shanghai", text: Binding(get: {
@@ -48,8 +32,8 @@ struct CapacitySettingsSection: View {
         }
     }
     private func periodBinding(_ id: String) -> Binding<WorkPeriod> {
-        Binding(get: { preferences.workPeriods?.first { $0.id == id } ?? WorkPeriod(id: id, startMinute: 540, endMinute: 600) }, set: { value in
-            if let index = preferences.workPeriods?.firstIndex(where: { $0.id == id }) { preferences.workPeriods?[index] = value }
+        Binding(get: { preferences.workPeriods.first { $0.id == id } ?? WorkPeriod(id: id, startMinute: 540, endMinute: 600) }, set: { value in
+            if let index = preferences.workPeriods.firstIndex(where: { $0.id == id }) { preferences.workPeriods[index] = value }
         })
     }
 }
@@ -114,7 +98,7 @@ private struct DayCapacityEditor: View {
                     Text("这一天使用常规工作时段和周末设置。")
                     Button("单独设置这一天") {
                         if preferences.dayOverrides == nil { preferences.dayOverrides = [] }
-                        preferences.dayOverrides?.append(DayAvailabilityOverride(id: key, periods: preferences.effectiveWorkPeriods))
+                        preferences.dayOverrides?.append(DayAvailabilityOverride(id: key, periods: preferences.workPeriods))
                     }.accessibilityIdentifier("capacity.createOverride")
                 }
             } footer: { Text("仅调整这一天的工作时间。返回设置并保存后生效。") }

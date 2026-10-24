@@ -612,11 +612,4 @@ extension Workspace {
         do { try addDependency(dependency, now: now) }
         catch CoreError.cycle { /* Retain the existing graph when a default would contradict it. */ }
     }
-
-    /// 旧数据需要“验收规则已更新”一次性迁移提示：只认旧版明确的“非必需”验收条件（`isRequired == false`）。
-    /// 取舍（已记录）：无验收条件的旧节点与“新用户默认节点”不可区分，因此不再触发提示，
-    /// 否则会对全新用户误报；若日后要补齐，应引入升级时的 schema/迁移标记而非从当前形状反推。
-    public var needsAcceptanceReinterpretationNotice: Bool {
-        acceptances.contains { $0.isRequired == false }
-    }
 }

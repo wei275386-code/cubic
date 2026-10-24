@@ -92,8 +92,8 @@ import Testing
         #expect(w.nodeCompletionIssues(id:"n").isEmpty)
         #expect(w.sourceSatisfied(.node("n")))
         try w.completeNode(id:"n",now:PRD.at(4))
-        // 一旦添加验收条件（旧 isRequired:false 也按必需），必须逐条人工通过
-        try w.addAcceptance(Acceptance(id:"g3",subject:.node("n"),name:"third",isRequired:false),now:PRD.at(5))
+        // 一旦添加验收条件，必须逐条人工通过
+        try w.addAcceptance(Acceptance(id:"g3",subject:.node("n"),name:"third"),now:PRD.at(5))
         #expect(w.nodes[0].completedAt == nil)
         #expect(w.acceptanceMode(for:.node("n")) == .explicit)
         #expect(!w.sourceSatisfied(.node("n")))

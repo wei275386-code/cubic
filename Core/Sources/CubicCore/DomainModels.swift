@@ -38,7 +38,6 @@ extension Blocker {
 extension Dependency { public var isActive: Bool { removedAt == nil }; public var currentRevision: Int { revision ?? 1 } }
 extension Acceptance {
     /// 验收条件没有“可选”语义：一旦添加即为必需（2026-10-06 决策）。
-    /// isRequired 字段为旧数据兼容保留，判定一律视为必需。
     public var required: Bool { true }
     public var currentRound: Int { round ?? 1 }
     public var isActive: Bool { removedAt == nil }

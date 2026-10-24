@@ -47,13 +47,10 @@ struct SyncedCalendarSelection: Codable, Sendable, Equatable {
 }
 
 private struct SyncedWorkSchedule: Codable {
-    var workStartHour: Int
-    var workEndHour: Int
     var workWeekends: Bool
-    var slotEnergy: String
     var workTimeZoneID: String?
-    var workScheduleConfigured: Bool?
-    var workPeriods: [WorkPeriod]?
+    var workScheduleConfigured: Bool
+    var workPeriods: [WorkPeriod]
 }
 private struct SyncedCalendarSettings: Codable {
     var selected: [SyncedCalendarSelection]?
@@ -81,12 +78,7 @@ enum ReminderCategory: String, CaseIterable, Sendable {
 }
 
 struct UserPreferences: Codable, Sendable, Equatable {
-    var workStartHour = 9
-    var workEndHour = 18
-    // Decode old backups without carrying their former daily cap into the PRD resource model.
-    var dailyLimitMinutes = 240
     var workWeekends = false
-    var slotEnergy = "normal"
     var selectedCalendarIDs: Set<String>?
     var countAllDayEvents = true
     var calendarEnabled = false
@@ -97,21 +89,16 @@ struct UserPreferences: Codable, Sendable, Equatable {
         remindersEnabled && !(disabledReminderCategories ?? []).contains(ReminderCategory.category(for: kind).rawValue)
     }
     var workTimeZoneID: String?
-    var workScheduleConfigured: Bool?
-    var workPeriods: [WorkPeriod]?
+    /// False until the user saves their schedule; the default period is only a starting point.
+    var workScheduleConfigured = false
+    var workPeriods = [WorkPeriod(id: "default-work-period", startMinute: 9 * 60, endMinute: 18 * 60)]
     var dayOverrides: [DayAvailabilityOverride]?
     var calendarOccupancyRules: [String: CalendarOccupancyRule]?
     var syncedCalendarSelection: [SyncedCalendarSelection]?
     /// Device-only cache, excluded from syncValues, preserves identities while permission is unavailable.
     var calendarIDBindings: [String: String]?
-    /// 旧数据“验收规则已更新”一次性提示是否已确认（可选以兼容旧偏好）。
-    var acceptanceNoticeAcknowledged: Bool?
 
     var workTimeZone: TimeZone { TimeZone(identifier: workTimeZoneID ?? TimeZone.current.identifier) ?? .current }
-    var hasDeclaredWorkSchedule: Bool { workScheduleConfigured ?? (workPeriods != nil) }
-    var effectiveWorkPeriods: [WorkPeriod] {
-        workPeriods ?? [WorkPeriod(id: "legacy-work-period", startMinute: workStartHour * 60, endMinute: workEndHour * 60, energy: slotEnergy)]
-    }
     func dateKey(_ date: Date) -> String {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = workTimeZone
@@ -142,8 +129,8 @@ struct UserPreferences: Codable, Sendable, Equatable {
                     sourceTitle: calendar?.sourceTitle ?? previous?.sourceTitle, sourceType: calendar?.sourceType ?? previous?.sourceType, rule: rule(for: id))
             }.sorted { $0.localID < $1.localID }
         }
-        return ["workSchedule": try value(SyncedWorkSchedule(workStartHour: workStartHour, workEndHour: workEndHour,
-            workWeekends: workWeekends, slotEnergy: slotEnergy, workTimeZoneID: workTimeZoneID,
+        return ["workSchedule": try value(SyncedWorkSchedule(
+            workWeekends: workWeekends, workTimeZoneID: workTimeZoneID,
             workScheduleConfigured: workScheduleConfigured, workPeriods: workPeriods)),
             "dayOverrides": try value((dayOverrides ?? []).sorted { $0.id < $1.id }),
             "calendarEnabled": .bool(calendarEnabled),
@@ -158,8 +145,7 @@ struct UserPreferences: Codable, Sendable, Equatable {
         }
         if let field = fields["workSchedule"] {
             let schedule = try decode(SyncedWorkSchedule.self, field)
-            result.workStartHour = schedule.workStartHour; result.workEndHour = schedule.workEndHour
-            result.workWeekends = schedule.workWeekends; result.slotEnergy = schedule.slotEnergy
+            result.workWeekends = schedule.workWeekends
             result.workTimeZoneID = schedule.workTimeZoneID; result.workScheduleConfigured = schedule.workScheduleConfigured
             result.workPeriods = schedule.workPeriods
         }
@@ -183,14 +169,10 @@ struct UserPreferences: Codable, Sendable, Equatable {
         calendarIDBindings = Dictionary(selection.map { ($0.resolvedID(in: calendars), $0.localID) }, uniquingKeysWith: { first, _ in first })
     }
     func validate() throws {
-        guard (0...23).contains(workStartHour), (1...24).contains(workEndHour), workStartHour < workEndHour,
-              ["low", "normal", "high"].contains(slotEnergy),
-              workTimeZoneID.map({ TimeZone(identifier: $0) != nil }) ?? true else {
-            throw PreferenceError.invalid
-        }
-        guard effectiveWorkPeriods.count <= 48, (dayOverrides ?? []).count <= 3660,
+        guard workTimeZoneID.map({ TimeZone(identifier: $0) != nil }) ?? true else { throw PreferenceError.invalid }
+        guard workPeriods.count <= 48, (dayOverrides ?? []).count <= 3660,
               (dayOverrides ?? []).allSatisfy({ $0.periods.count <= 48 }) else { throw PreferenceError.invalid }
-        for period in effectiveWorkPeriods + (dayOverrides ?? []).flatMap(\.periods) {
+        for period in workPeriods + (dayOverrides ?? []).flatMap(\.periods) {
             guard (0..<1440).contains(period.startMinute), (1...1440).contains(period.endMinute),
                   period.startMinute < period.endMinute, ["low", "normal", "high"].contains(period.energy) else {
                 throw PreferenceError.invalid
