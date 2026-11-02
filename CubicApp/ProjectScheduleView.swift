@@ -20,15 +20,16 @@ struct CubicProjectDetailView: View {
             case .schedule: ProjectScheduleView(projectID: projectID)
             }
         }
-        .safeAreaInset(edge: .top, spacing: 0) {
-            Picker("视图", selection: Binding(get: { current }, set: { mode = $0 })) {
-                ForEach(ProjectDetailMode.allCases) { Text($0.title).tag($0) }
+        .toolbar {
+            // In the bar itself, so scrolling content passes under the system glass instead of the control.
+            ToolbarItem(placement: .principal) {
+                Picker("视图", selection: Binding(get: { current }, set: { mode = $0 })) {
+                    ForEach(ProjectDetailMode.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented).labelsHidden()
+                .frame(width: 180)
+                .accessibilityIdentifier("project.mode")
             }
-            .pickerStyle(.segmented).labelsHidden()
-            .frame(maxWidth: 320)
-            .padding(.horizontal, 16).padding(.vertical, 8)
-            .frame(maxWidth: .infinity)
-            .accessibilityIdentifier("project.mode")
         }
     }
 }

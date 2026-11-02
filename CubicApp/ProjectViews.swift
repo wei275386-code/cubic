@@ -130,26 +130,35 @@ struct ProjectCardRow: View {
             VStack(alignment: .leading, spacing: 4) {
                 ProjectListTitle(text: project.name)
                     .font(.body.weight(.semibold))
-                Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                ForEach(detailLines, id: \.self) { Text($0).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
             }
             Spacer(minLength: 4)
             HealthChip(health: health)
         }.padding(.vertical, 4)
     }
-    private var detail: String {
-        var parts: [String] = []
-        if let date = project.deadline { parts.append("截止 \(ProjectUI.datePart(date, zone: project.deadlineTimeZoneID))") }
+    /// Deadline on one line, remaining work on the next, so neither is truncated on a phone.
+    private var detailLines: [String] {
+        var lines: [String] = []
+        var first: [String] = []
+        if let date = project.deadline {
+            let zone = project.deadlineTimeZoneID.flatMap(TimeZone.init(identifier:)) ?? model.preferences.workTimeZone
+            var style = Date.FormatStyle(timeZone: zone).locale(Locale(identifier: "zh_CN")).month(.defaultDigits).day()
+            if Calendar.current.component(.year, from: date) != Calendar.current.component(.year, from: model.now) { style = style.year() }
+            first.append("截止 \(date.formatted(style))")
+        }
+        if project.archived { first.append("已归档") }
+        if !first.isEmpty { lines.append(first.joined(separator: " · ")) }
         let ids = model.projectItemIDs(project.id)
         let remaining = model.workspace.items.filter { ids.contains($0.id) && $0.status != .completed && !$0.archived && $0.effectiveDisposition != .cancelled }
         if !remaining.isEmpty {
             let known = remaining.compactMap(\.remainingMinutes).reduce(0, +)
             let unknown = remaining.filter { $0.remainingMinutes == nil }.count
-            let effort = unknown == 0 ? shortMinutesLabel(known) : known == 0 ? "\(unknown) 项待估计" : "已知 \(shortMinutesLabel(known))，另有 \(unknown) 项待估计"
-            parts.append("剩 \(remaining.count) 项 · \(effort)")
+            let effort = unknown == 0 ? shortMinutesLabel(known) : known == 0 ? "\(unknown) 项待估计" : "已知 \(shortMinutesLabel(known))，\(unknown) 项待估计"
+            lines.append("剩 \(remaining.count) 项 · \(effort)")
         }
-        if project.archived { parts.append("已归档") }
-        return parts.isEmpty ? ProjectUI.projectStatus(project.effectiveStatus) : parts.joined(separator: " · ")
+        return lines.isEmpty ? [ProjectUI.projectStatus(project.effectiveStatus)] : lines
     }
+
 }
 
 struct ProjectSummaryRow: View {

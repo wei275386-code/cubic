@@ -509,26 +509,31 @@ private struct MacWeekGrid: View {
     }
     var body: some View {
         let range = hourRange
-        VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                Color.clear.frame(width: 52)
-                ForEach(days, id: \.self) { day in header(day).frame(maxWidth: .infinity) }
-            }.padding(.vertical, 8).padding(.trailing, 8)
-            Divider()
-            ScrollView {
-                HStack(alignment: .top, spacing: 0) {
-                    ForEach(Array(days.enumerated()), id: \.element) { index, day in
-                        let today = calendar.isDate(day, inSameDayAs: Date())
-                        CalendarTimelineView(day: day, calendar: calendar, slots: model.capacitySlots(on: day), events: model.busyEvents(on: day),
-                                             itemIDs: itemIDs, allocations: allocations(day), markers: model.waitMarkers(on: day),
-                                             showsRail: false, showsHourLabels: index == 0, hourRange: range, hourHeight: days.count == 1 ? 64 : 52)
-                            .frame(width: nil).frame(maxWidth: .infinity)
-                            .layoutPriority(index == 0 ? 1 : 0)
-                            .background(today ? Color.cubicAccent.opacity(0.03) : .clear)
-                            .overlay(alignment: .leading) { if index > 0 { Rectangle().fill(Color.secondary.opacity(0.15)).frame(width: 0.5) } }
-                    }
-                }.padding(.trailing, 8)
+        GeometryReader { geometry in
+            // Explicit column widths: every timeline is a greedy GeometryReader, so an HStack alone would not share space evenly.
+            let gutter: CGFloat = 52, trailing: CGFloat = 8
+            let column = max(60, (geometry.size.width - gutter - trailing) / CGFloat(max(1, days.count)))
+            VStack(spacing: 0) {
+                HStack(spacing: 0) {
+                    Color.clear.frame(width: gutter + 4)
+                    ForEach(days, id: \.self) { day in header(day).frame(width: column) }
+                }.padding(.vertical, 8).fixedSize(horizontal: false, vertical: true)
+                Divider()
+                ScrollView {
+                    HStack(alignment: .top, spacing: 0) {
+                        ForEach(Array(days.enumerated()), id: \.element) { index, day in
+                            let today = calendar.isDate(day, inSameDayAs: Date())
+                            CalendarTimelineView(day: day, calendar: calendar, slots: model.capacitySlots(on: day), events: model.busyEvents(on: day),
+                                                 itemIDs: itemIDs, allocations: allocations(day), markers: model.waitMarkers(on: day),
+                                                 showsRail: false, showsHourLabels: index == 0, hourRange: range, hourHeight: days.count == 1 ? 64 : 52)
+                                .frame(width: index == 0 ? column + gutter - 4 : column)
+                                .background(today ? Color.cubicAccent.opacity(0.03) : .clear)
+                                .overlay(alignment: .leading) { if index > 0 { Rectangle().fill(Color.secondary.opacity(0.15)).frame(width: 0.5) } }
+                        }
+                    }.padding(.leading, 4).padding(.trailing, trailing)
+                }
             }
+            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
         }
     }
     private func header(_ day: Date) -> some View {
