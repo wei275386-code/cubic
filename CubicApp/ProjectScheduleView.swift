@@ -173,7 +173,14 @@ struct ProjectGantt: View {
         let days = max(7, min(120, (cal.dateComponents([.day], from: start, to: last).day ?? 0) + 2))
         let width = CGFloat(days) * dayWidth
         let dayWidth = dayWidth
-        let x: (Date) -> CGFloat = { CGFloat($0.timeIntervalSince(start) / 86_400) * dayWidth }
+        // Day index plus the share of that calendar day, so 23/25-hour DST days stay aligned with the header.
+        let x: (Date) -> CGFloat = { date in
+            let dayStart = cal.startOfDay(for: date)
+            let index = cal.dateComponents([.day], from: start, to: dayStart).day ?? 0
+            let dayEnd = cal.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart.addingTimeInterval(86_400)
+            let fraction = date.timeIntervalSince(dayStart) / dayEnd.timeIntervalSince(dayStart)
+            return (CGFloat(index) + CGFloat(fraction)) * dayWidth
+        }
 
         if rows.isEmpty {
             Text("没有未完成的工作").foregroundStyle(.secondary).padding(.horizontal, 16)

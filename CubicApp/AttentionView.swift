@@ -37,7 +37,7 @@ struct AttentionView: View {
                 }
             }
             if !summary.tightProjects.isEmpty {
-                Section("时间紧张") {
+                Section("时间紧张或需要协调") {
                     ForEach(summary.tightProjects, id: \.id) { ProjectRiskRow(project: $0) }
                 }
             }
@@ -136,7 +136,7 @@ private struct ProjectRiskRow: View {
                 let health = model.health(ofProject: project.id)
                 Image(systemName: health.symbol).foregroundStyle(health.tint).frame(width: 20)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(health == .late ? "\(project.name) 来不及" : "\(project.name) 时间紧张").font(.body.weight(.medium))
+                    Text("\(project.name) · \(health.label)").font(.body.weight(.medium))
                     Text(gapText).font(.caption).foregroundStyle(.secondary)
                 }
             }
@@ -144,6 +144,7 @@ private struct ProjectRiskRow: View {
     }
     private var gapText: String {
         guard let assessment = model.planning?.projects.first(where: { $0.projectID == project.id }) else { return "查看排期" }
+        if model.health(ofProject: project.id) == .contested { return "与其他项目争用同一段时间 · 查看排期" }
         let gap = (assessment.totalDemandMinutes ?? assessment.knownDemandMinutes) - assessment.knownCapacityMinutes
         return gap > 0 ? "缺口约 \(shortMinutesLabel(gap)) · 查看排期" : "余量很少 · 查看排期"
     }

@@ -21,12 +21,13 @@ enum CubicMetrics {
 
 /// One vocabulary for schedule risk, used by every list, chip and detail page.
 enum ProjectHealth: Equatable {
-    case onTrack, tight, late, unknown, noDeadline, calculating, done
+    case onTrack, tight, contested, late, unknown, noDeadline, calculating, done
 
     var label: String {
         switch self {
         case .onTrack: "正常"
         case .tight: "紧张"
+        case .contested: "需协调"
         case .late: "来不及"
         case .unknown: "信息不足"
         case .noDeadline: "无截止"
@@ -37,7 +38,7 @@ enum ProjectHealth: Equatable {
     var tint: Color {
         switch self {
         case .onTrack: .cubicOnTrack
-        case .tight: .cubicAmber
+        case .tight, .contested: .cubicAmber
         case .late: .cubicLate
         case .unknown, .noDeadline, .calculating, .done: .secondary
         }
@@ -46,6 +47,7 @@ enum ProjectHealth: Equatable {
         switch self {
         case .onTrack: "checkmark.circle.fill"
         case .tight: "exclamationmark.circle.fill"
+        case .contested: "arrow.triangle.merge"
         case .late: "exclamationmark.triangle.fill"
         case .unknown: "questionmark.circle.fill"
         case .noDeadline: "minus.circle.fill"
@@ -55,7 +57,7 @@ enum ProjectHealth: Equatable {
     }
     /// Lower values need attention first.
     var urgency: Int {
-        switch self { case .late: 0; case .tight: 1; case .unknown: 2; case .calculating: 3; case .onTrack: 4; case .noDeadline: 5; case .done: 6 }
+        switch self { case .late: 0; case .contested, .tight: 1; case .unknown: 2; case .calculating: 3; case .onTrack: 4; case .noDeadline: 5; case .done: 6 }
     }
 }
 
@@ -74,9 +76,15 @@ extension AppModel {
             return project.deadline == nil ? .noDeadline : .calculating
         }
         let risks = projectRisks(projectID)
+        // Only a shortfall proven for this project means it alone cannot finish in time.
+        // A shortage shared with other projects means they cannot all finish; which one slips is a choice.
         if assessment.feasibility == .infeasible ||
-            risks.contains(where: { $0.kind == .provenCapacityShortfall || ($0.kind == .sharedResourceConflict && ($0.shortageMinutes ?? 0) > 0) }) {
+            risks.contains(where: { $0.kind == .provenCapacityShortfall && $0.projectID == projectID }) {
             return .late
+        }
+        if risks.contains(where: { ($0.kind == .provenCapacityShortfall && $0.projectID != projectID) ||
+            ($0.kind == .sharedResourceConflict && ($0.shortageMinutes ?? 0) > 0) }) {
+            return .contested
         }
         if project.deadline == nil { return assessment.totalDemandMinutes == nil ? .unknown : .noDeadline }
         if [.insufficient, .boundaryReached].contains(assessment.warningState) ||
@@ -100,6 +108,11 @@ extension AppModel {
 
     func health(ofItem item: WorkItem) -> ProjectHealth {
         relatedProjectIDs(for: item).map { health(ofProject: $0) }.min { $0.urgency < $1.urgency } ?? .noDeadline
+    }
+
+    /// Health of every project computed once, for sorting and summaries.
+    var healthByProject: [String: ProjectHealth] {
+        Dictionary(uniqueKeysWithValues: workspace.projects.map { ($0.id, health(ofProject: $0.id)) })
     }
 }
 

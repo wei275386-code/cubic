@@ -36,12 +36,22 @@ extension AppModel {
     /// Work that can start now, soonest deadline first.
     var availableWork: [WorkItem] {
         let ids = Set(snapshot?.availableActions.map(\.itemID) ?? [])
-        func deadline(_ item: WorkItem) -> Date {
-            min(item.deadline ?? .distantFuture, workspace.projects.filter { relatedProjectIDs(for: item).contains($0.id) }.compactMap(\.deadline).min() ?? .distantFuture)
-        }
-        return PlanningDisplay.actionItems(workspace: workspace) { relatedProjectIDs(for: $0) }
+        let projectDeadlines = Dictionary(uniqueKeysWithValues: workspace.projects.map { ($0.id, $0.deadline ?? .distantFuture) })
+        let items = PlanningDisplay.actionItems(workspace: workspace) { relatedProjectIDs(for: $0) }
             .filter { ids.contains($0.id) && !$0.needsReview }
-            .sorted { deadline($0) == deadline($1) ? $0.name < $1.name : deadline($0) < deadline($1) }
+        let deadlines = Dictionary(uniqueKeysWithValues: items.map { item in
+            (item.id, min(item.deadline ?? .distantFuture, relatedProjectIDs(for: item).compactMap { projectDeadlines[$0] }.min() ?? .distantFuture))
+        })
+        return items.sorted { lhs, rhs in
+            let left = deadlines[lhs.id]!, right = deadlines[rhs.id]!
+            return left == right ? lhs.name < rhs.name : left < right
+        }
+    }
+    /// Focused work that cannot start yet; shown beside the available list so it never loses its entry.
+    var focusedWaitingWork: [WorkItem] {
+        let available = Set(availableWork.map(\.id))
+        return PlanningDisplay.actionItems(workspace: workspace) { relatedProjectIDs(for: $0) }
+            .filter { $0.isFocused == true && !$0.needsReview && !available.contains($0.id) }
     }
     func workContext(_ item: WorkItem) -> String {
         let projects = workspace.projects.filter { relatedProjectIDs(for: item).contains($0.id) }.map(\.name)
@@ -163,6 +173,11 @@ struct CalendarHomeView: View {
             Button("上一页", systemImage: "chevron.left") { move(-1) }
             Button("今天") { day = Date() }.accessibilityIdentifier("calendar.today")
             Button("下一页", systemImage: "chevron.right") { move(1) }
+        }
+        ToolbarItem(placement: .primaryAction) {
+            NavigationLink { CalendarDayDetailsView(day: day, itemIDs: visibleItemIDs) } label: {
+                Label("当日详情", systemImage: "list.bullet.rectangle")
+            }.help("\(CalendarFormat.dayTitle(day, calendar: cal)) 的空档、占用与最晚开始").accessibilityIdentifier("calendar.dayDetails")
         }
         ToolbarItem(placement: .primaryAction) {
             Picker("视图", selection: $weekMode) {
@@ -403,9 +418,12 @@ struct AvailableWorkSection: View {
                         .accessibilityLabel("试算 \(item.name)").accessibilityIdentifier("action.trial.\(item.id)")
                 }
             }
-            if let limit, available.count > limit {
-                NavigationLink("查看全部 \(available.count) 项") { AvailableWorkView() }
-                    .accessibilityIdentifier("actions.all")
+            if let limit {
+                let focused = model.focusedWaitingWork.count
+                if available.count > limit || focused > 0 {
+                    NavigationLink(focused > 0 ? "查看全部 \(available.count) 项与 \(focused) 项关注的工作" : "查看全部 \(available.count) 项") { AvailableWorkView() }
+                        .accessibilityIdentifier("actions.all")
+                }
             }
         } header: { Text("现在可开始") }
         .sheet(isPresented: Binding(get: { trialID != nil }, set: { if !$0 { trialID = nil } })) {
@@ -419,9 +437,7 @@ struct AvailableWorkView: View {
     var body: some View {
         List {
             AvailableWorkSection()
-            let available = Set(model.availableWork.map(\.id))
-            let focused = PlanningDisplay.actionItems(workspace: model.workspace) { model.relatedProjectIDs(for: $0) }
-                .filter { $0.isFocused == true && !$0.needsReview && !available.contains($0.id) }
+            let focused = model.focusedWaitingWork
             if !focused.isEmpty {
                 Section("我关注的工作") {
                     ForEach(focused, id: \.id) { item in
@@ -444,7 +460,7 @@ struct AvailableWorkCompactList: View {
             HStack {
                 Text("现在可开始").font(.headline)
                 Spacer()
-                if available.count > 6 {
+                if available.count > 6 || !model.focusedWaitingWork.isEmpty {
                     NavigationLink("全部") { AvailableWorkView() }.font(.caption)
                 }
             }
@@ -477,11 +493,16 @@ private struct MacWeekGrid: View {
         var lower = 8, upper = 19
         for day in days {
             let start = calendar.startOfDay(for: day)
-            let dates = model.capacitySlots(on: day).flatMap { [$0.start, $0.end] } +
-                (model.workspace.timeBlocks ?? []).filter { calendar.isDate($0.start, inSameDayAs: day) }.flatMap { [$0.start, $0.end] }
-            for date in dates {
-                let hour = Int(date.timeIntervalSince(start) / 3600)
-                lower = min(lower, max(0, hour - 1)); upper = max(upper, min(24, hour + 1))
+            let end = calendar.date(byAdding: .day, value: 1, to: start)!
+            // Clip anything that intersects the day, including blocks and events that began the day before.
+            let intervals = model.capacitySlots(on: day).map { ($0.start, $0.end) } +
+                (model.workspace.timeBlocks ?? []).map { ($0.start, $0.end) } +
+                model.busyEvents(on: day).filter { !$0.allDay }.map { ($0.start, $0.end) } +
+                model.waitMarkers(on: day).map { ($0.date, $0.date) }
+            for (lowerDate, upperDate) in intervals where lowerDate < end && upperDate >= start {
+                let first = Int(max(lowerDate, start).timeIntervalSince(start) / 3600)
+                let last = Int(ceil(min(upperDate, end).timeIntervalSince(start) / 3600))
+                lower = min(lower, max(0, first - 1)); upper = max(upper, min(24, last + 1))
             }
         }
         return lower...max(lower + 6, upper)

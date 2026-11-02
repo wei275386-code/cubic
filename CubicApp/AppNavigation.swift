@@ -62,7 +62,7 @@ struct AttentionSummary {
         if let blocker = dueFollowUps.first { return "跟进：\(blocker.name)" }
         if let project = lateProjects.first { return "\(project.name) 来不及" }
         if let item = reviewItems.first { return "\(item.name) 需要复核" }
-        if let project = tightProjects.first { return "\(project.name) 时间紧张" }
+        if let project = tightProjects.first { return "\(project.name) 需要关注排期" }
         if !inboxItems.isEmpty { return "\(inboxItems.count) 项待整理" }
         return nil
     }
@@ -79,17 +79,23 @@ extension AppModel {
         let cal = workCalendar
         let endOfToday = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) ?? now
         let waits = workspace.blockers.filter { $0.state != .resolved && $0.isArchived != true }
+        let now = now
         func dueDate(_ blocker: Blocker) -> Date? {
-            [blocker.followUpAt, blocker.state == .active ? blocker.estimatedResolution : nil].compactMap { $0 }.min()
+            let expected = blocker.state == .active ? blocker.estimatedResolution : nil
+            // Once the expected end has passed, a later follow-up is the user's chosen time to check again.
+            if let expected, expected <= now, let followUp = blocker.followUpAt, followUp > now { return followUp }
+            return [blocker.followUpAt, expected].compactMap { $0 }.min()
         }
         var summary = AttentionSummary()
         summary.dueFollowUps = waits.filter { dueDate($0).map { $0 < endOfToday } == true }
             .sorted { (dueDate($0) ?? .distantFuture) < (dueDate($1) ?? .distantFuture) }
-        summary.laterWaits = waits.filter { !summary.dueFollowUps.map(\.id).contains($0.id) }
+        let dueIDs = Set(summary.dueFollowUps.map(\.id))
+        summary.laterWaits = waits.filter { !dueIDs.contains($0.id) }
             .sorted { (dueDate($0) ?? .distantFuture) < (dueDate($1) ?? .distantFuture) }
         let active = workspace.projects.filter { !$0.archived && $0.hasDeliveryCommitment }
-        summary.lateProjects = active.filter { health(ofProject: $0.id) == .late }
-        summary.tightProjects = active.filter { health(ofProject: $0.id) == .tight }
+        let health = healthByProject
+        summary.lateProjects = active.filter { health[$0.id] == .late }
+        summary.tightProjects = active.filter { health[$0.id] == .tight || health[$0.id] == .contested }
         summary.reviewItems = workspace.items.filter { $0.needsReview && !$0.archived && $0.effectiveDisposition != .cancelled }
         summary.inboxItems = pendingInboxItems
         summary.unreadNotices = notices.filter { !$0.isResolved && !$0.isRead }

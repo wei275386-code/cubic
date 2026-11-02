@@ -129,7 +129,7 @@ struct WorkDetailView: View {
                 if item.status == .inProgress {
                     Button("继续这项工作", systemImage: "play") { sheet = .startFeedback(item) }.accessibilityIdentifier("work.resume")
                 }
-                Button("开始返工", systemImage: "arrow.uturn.backward") { sheet = .rework(item) }
+                Button("开始返工", systemImage: "arrow.uturn.backward") { sheet = .rework(item) }.accessibilityIdentifier("work.rework")
             }
             Button(item.effectiveDisposition == .deferred ? "恢复工作" : "留到以后再做", systemImage: "tray") {
                 disposition = item.effectiveDisposition == .deferred ? "active" : "deferred"

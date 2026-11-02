@@ -75,9 +75,10 @@ struct ProjectsView: View {
     @State private var createdProjectID: String?
     @State private var includeArchived = false
     private var projects: [Project] {
-        model.workspace.projects.filter { includeArchived || !$0.archived }
+        let health = model.healthByProject
+        return model.workspace.projects.filter { includeArchived || !$0.archived }
             .sorted { lhs, rhs in
-                let left = model.health(ofProject: lhs.id).urgency, right = model.health(ofProject: rhs.id).urgency
+                let left = health[lhs.id]?.urgency ?? 0, right = health[rhs.id]?.urgency ?? 0
                 if left != right { return left < right }
                 return (lhs.deadline ?? .distantFuture) < (rhs.deadline ?? .distantFuture)
             }
@@ -140,7 +141,12 @@ struct ProjectCardRow: View {
         if let date = project.deadline { parts.append("截止 \(ProjectUI.datePart(date, zone: project.deadlineTimeZoneID))") }
         let ids = model.projectItemIDs(project.id)
         let remaining = model.workspace.items.filter { ids.contains($0.id) && $0.status != .completed && !$0.archived && $0.effectiveDisposition != .cancelled }
-        if !remaining.isEmpty { parts.append("剩 \(remaining.count) 项 · \(shortMinutesLabel(remaining.reduce(0) { $0 + ($1.remainingMinutes ?? 0) }))") }
+        if !remaining.isEmpty {
+            let known = remaining.compactMap(\.remainingMinutes).reduce(0, +)
+            let unknown = remaining.filter { $0.remainingMinutes == nil }.count
+            let effort = unknown == 0 ? shortMinutesLabel(known) : known == 0 ? "\(unknown) 项待估计" : "已知 \(shortMinutesLabel(known))，另有 \(unknown) 项待估计"
+            parts.append("剩 \(remaining.count) 项 · \(effort)")
+        }
         if project.archived { parts.append("已归档") }
         return parts.isEmpty ? ProjectUI.projectStatus(project.effectiveStatus) : parts.joined(separator: " · ")
     }
