@@ -11,13 +11,17 @@ import XCTest
         let app = XCUIApplication()
         app.launchArguments = ["-CubicWorkCalendarQA", "-CubicWorkCalendarQAReset"]
         app.launch()
-        XCTAssertTrue(app.buttons["行动"].waitForExistence(timeout: 20)); app.buttons["行动"].tap()
+        XCTAssertTrue(app.buttons["今天"].waitForExistence(timeout: 20)); app.buttons["今天"].tap()
         let trial = app.buttons["action.trial.qa-drag"]
+        // 今天 puts the timeline before 现在可开始; scroll the lazy list to the row.
+        XCTAssertTrue(app.buttons["open-settings"].waitForExistence(timeout: 15))
+        for _ in 0..<8 where !trial.isHittable { app.swipeUp() }
         XCTAssertTrue(trial.waitForExistence(timeout: 15)); trial.tap()
         XCTAssertTrue(app.navigationBars["投入时间试算"].waitForExistence(timeout: 10))
         capture("architecture-trial-initial")
         app.buttons["关闭"].tap()
         XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "actions.choice.record.")).firstMatch.exists, "Closing trial must not create a choice")
+        for _ in 0..<8 where !trial.isHittable { app.swipeUp() }
         XCTAssertTrue(trial.waitForExistence(timeout: 10)); trial.tap()
         let preset = app.buttons["30 分钟"]
         XCTAssertTrue(preset.waitForExistence(timeout: 10)); preset.tap()
@@ -37,6 +41,7 @@ import XCTest
         XCTAssertFalse(app.alerts.firstMatch.exists)
         capture("architecture-choice-saved")
         let record = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "actions.choice.record.")).firstMatch
+        for _ in 0..<8 where !record.exists { app.swipeDown() }
         XCTAssertTrue(record.waitForExistence(timeout: 10))
         let choiceIdentity = record.identifier
         XCTAssertTrue(choiceIdentity.hasSuffix(".count.1"), "Double tap must save exactly one choice")
@@ -48,7 +53,7 @@ import XCTest
         capture("architecture-choice-evidence")
         app.terminate()
         app.launchArguments = ["-CubicWorkCalendarQA"]
-        app.launch(); XCTAssertTrue(app.buttons["行动"].waitForExistence(timeout: 20)); app.buttons["行动"].tap()
+        app.launch(); XCTAssertTrue(app.buttons["今天"].waitForExistence(timeout: 20)); app.buttons["今天"].tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "QA 拖拽时间块")).firstMatch.waitForExistence(timeout: 15))
         let restoredRecord = app.buttons[choiceIdentity]
         XCTAssertTrue(restoredRecord.waitForExistence(timeout: 10), "Reopen preserves exact choice ID and count")

@@ -93,6 +93,9 @@ struct ProjectsView: View {
                     EmptyMessage(symbol: "square.stack.3d.up", title: "还没有项目", detail: "点右上角创建，或从模板、Markdown 开始。")
                 }
             }
+            if model.workspace.projects.contains(where: \.archived) || includeArchived {
+                Section { Toggle("包含归档项目", isOn: $includeArchived).accessibilityIdentifier("projects.includeArchived") }
+            }
         }
         .cubicNavigationTitle("项目")
         .toolbar {
@@ -104,8 +107,6 @@ struct ProjectsView: View {
                         .accessibilityIdentifier("projects.templates")
                     Button("从 Markdown 快速创建", systemImage: "text.badge.plus") { sheet = .markdownProject { pendingCreatedProjectID = $0 } }
                         .accessibilityIdentifier("projects.createMarkdown")
-                    Divider()
-                    Toggle("包含归档项目", isOn: $includeArchived).accessibilityIdentifier("projects.includeArchived")
                 } label: { Label("创建项目", systemImage: "plus") }
                     .accessibilityIdentifier("projects.menu")
             }

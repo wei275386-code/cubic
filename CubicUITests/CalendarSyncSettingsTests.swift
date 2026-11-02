@@ -66,7 +66,7 @@ import XCTest
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "仅本机")).firstMatch.exists)
         capture("folder-picker-cancelled-local-preserved", app: app)
         app.navigationBars["设置"].buttons["取消"].tap()
-        XCTAssertTrue(app.buttons["行动"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["今天"].waitForExistence(timeout: 10))
     }
 
     func testAppleCalendarSetupIsReachableFromSettingsAndCalendar() throws {
@@ -109,7 +109,7 @@ import XCTest
         XCTAssertTrue(app.buttons["open-settings"].waitForExistence(timeout: 20), app.debugDescription)
         XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "QA 删除工作、")).firstMatch.exists)
         app.buttons["日历"].tap()
-        XCTAssertFalse(app.descendants(matching: .any)["calendar.project.qa-project"].exists, "Normal launch must not expose the isolated QA workspace")
+        XCTAssertFalse(app.descendants(matching: .any)["calendar.drag.item.qa-drag"].exists, "Normal launch must not expose the isolated QA workspace")
         capture("normal-workspace-restored-without-qa-arguments", app: app)
         print("QA-NORMAL-RESTORE launchArguments=[] qaProjectAbsent=true")
     }
@@ -130,7 +130,7 @@ import XCTest
             XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "示例数据")).firstMatch.exists, app.debugDescription)
             XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "示例提供")).firstMatch.exists, app.debugDescription)
         }
-        for tab in ["收件箱", "行动", "日历", "项目"] {
+        for tab in ["今天", "日历", "项目", "待处理"] {
             app.buttons[tab].tap()
             assertNoSample()
             capture("pro-empty-" + tab, app: app)

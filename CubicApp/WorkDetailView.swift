@@ -14,42 +14,16 @@ struct WorkDetailView: View {
     var body: some View {
         List {
             if let item = model.item(itemID) {
-                Section("工作概况") {
-                    ProjectWorkRow(item: item, showsFullName: true)
-                    Text(item.description ?? "尚未填写工作说明").fixedSize(horizontal: false, vertical: true)
-                    Text("工作第 \(item.currentRound) 轮")
-                    if let date = item.started { ProjectInfoLine(title: "首次开始", value: ProjectUI.dateLabel(date)) }
-                    if let date = item.completedAt { ProjectInfoLine(title: "本轮完成", value: ProjectUI.dateLabel(date)) }
+                Section {
+                    WorkDetailHeader(item: item)
                     if item.description == nil && item.projectIDs.isEmpty && item.nodeID == nil {
                         Button { sheet = .clarify(item) } label: { Label("整理这条事项", systemImage: "tray.and.arrow.up").frame(minHeight: 44) }.accessibilityIdentifier("work.clarify")
                     }
-                    Button { sheet = .editItem(item) } label: { Label("编辑工作", systemImage: "pencil").frame(minHeight: 44) }.accessibilityIdentifier("work.edit")
-                }
-                Section("开始与记录") {
-                    if model.workspace.currentNextAction?.itemID == itemID { Label("当前下一步", systemImage: "arrow.right.circle") }
-                    if item.status != .completed && item.effectiveDisposition == .active {
-                    ProjectMutationButton("设为下一步", symbol: "arrow.right.circle", identifier: "work.choose") {
-                        try $0.chooseNextAction(itemID: itemID, now: Date(), displayedItemIDs: [itemID], dataVersion: model.sourceVersion, impactWasVerified: false, note: "详情直接选择，未核验投入影响")
+                    if item.effectiveDisposition == .active { stateActions(item) }
+                    if item.status != .completed && !ProjectUI.predecessorsSatisfied(itemID, in: model.workspace) {
+                        Label("前置条件尚未满足，暂时不能开始。可以先检查关系，或复核已有成果是否仍可用。", systemImage: "lock")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
-                    }
-                    if item.status != .completed && item.effectiveDisposition == .active {
-                        Button { sheet = .startFeedback(item) } label: {
-                            Label(item.status == .pending ? "现在开始" : "继续这项工作", systemImage: "play").frame(minHeight: 44)
-                        }.accessibilityIdentifier(item.status == .pending ? "work.start" : "work.resume")
-                        if item.status == .inProgress {
-                            Button { sheet = .record(item) } label: { Label("暂停并记录进展", systemImage: "pause.circle").frame(minHeight: 44) }.accessibilityIdentifier("work.pauseFeedback")
-                        }
-                        Button { sheet = .trial(itemID) } label: { Label("试算投入时间", systemImage: "cube.transparent").frame(minHeight: 44) }.accessibilityIdentifier("work.trial")
-                        Button { sheet = .record(item) } label: { Label("记录投入与剩余", systemImage: "clock.badge.checkmark").frame(minHeight: 44) }.accessibilityIdentifier("work.record")
-                        Button { complete = true } label: { Label("确认完成", systemImage: "checkmark.circle").frame(minHeight: 44) }.accessibilityIdentifier("work.complete")
-                    }
-                    if item.status == .completed {
-                        Button { sheet = .historicalRecord(item) } label: {
-                            Label("补录以前已发生的投入", systemImage: "clock.arrow.circlepath").frame(minHeight: 44)
-                        }.accessibilityIdentifier("work.recordHistorical")
-                    }
-                    Button { sheet = .rework(item) } label: { Label("开始返工", systemImage: "arrow.uturn.backward").frame(minHeight: 44) }.accessibilityIdentifier("work.rework")
-                    if !ProjectUI.predecessorsSatisfied(itemID, in: model.workspace) { Text("前置条件尚未满足，暂时不能开始新工作。可以先检查关系，或复核已有成果是否仍可用。").font(.caption).foregroundStyle(.secondary) }
                 }
                 if item.needsReview { WorkReviewSection(item: item) }
                 Section("开始前需要完成") {
@@ -68,34 +42,18 @@ struct WorkDetailView: View {
                     ForEach(model.workspace.workLinks?.filter { $0.source == .item(itemID) && $0.removedAt == nil } ?? [], id: \.id) { link in
                         ProjectInfoLine(title: "共享至", value: "\(model.workspace.projects.first { $0.id == link.projectID }?.name ?? link.projectID)\n\(link.nodeID.flatMap { id in model.workspace.nodes.first { $0.id == id }?.name } ?? "项目直属")")
                     }
-                    Button { disposition = item.effectiveDisposition == .deferred ? "active" : "deferred" } label: { Label(item.effectiveDisposition == .deferred ? "恢复工作" : "留到以后再做", systemImage: "tray").frame(minHeight: 44) }.accessibilityIdentifier("work.defer")
-                    Button(role: .destructive) { delete = true } label: {
-                        Label("删除工作", systemImage: "trash").frame(minHeight: 44)
-                    }.disabled(model.saving).accessibilityIdentifier("work.delete")
-                    Button { copy = true } label: { Label("创建独立副本", systemImage: "doc.on.doc").frame(minHeight: 44) }.accessibilityIdentifier("work.copy")
                 }
-                Section("下一步选择记录") {
-                    ForEach(model.workspace.choices?.filter { $0.itemID == itemID }.sorted { $0.date > $1.date } ?? [], id: \.id) { choice in
-                        NavigationLink { ChoiceDetailView(choice: choice) } label: { ProjectInfoLine(title: choice.impactWasVerified ? "已试算后选择" : "直接选择，未试算影响", value: ProjectUI.dateLabel(choice.date)).frame(minHeight: 44) }.accessibilityIdentifier("work.choice.\(choice.id)")
-                    }
-                }
-                WorkEstimateHistorySection(itemID: itemID)
-                WorkEffortHistorySection(itemID: itemID)
-                Section("历次工作与返工") {
-                    ForEach(model.workspace.workRounds?.filter { $0.itemID == itemID }.sorted { $0.round > $1.round } ?? [], id: \.id) { round in
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("第 \(round.round) 轮").font(.headline)
-                            if let date = round.startedAt { ProjectInfoLine(title: "当轮开始时间", value: ProjectUI.dateLabel(date)) }
-                            if let date = round.completedAt { ProjectInfoLine(title: "当轮完成时间", value: ProjectUI.dateLabel(date)) }
-                        }.accessibilityIdentifier("work.round.\(round.id)")
-                    }
-                    ForEach(model.workspace.reviews?.filter { $0.itemID == itemID } ?? [], id: \.id) { review in
-                        ProjectInfoLine(title: review.outcome == .stillValid ? "已确认成果仍可用" : "等待前置恢复", value: "\(ProjectUI.dateLabel(review.date))\n\(review.note)")
-                            .accessibilityIdentifier("work.review.history.\(review.id)")
-                    }
+                Section {
+                    NavigationLink { WorkHistoryView(itemID: itemID) } label: { Label("选择、估计与投入历史", systemImage: "clock.arrow.circlepath") }
+                        .accessibilityIdentifier("work.history")
                 }
             } else { Text("这项工作已不可用，请返回列表。") }
         }.cubicNavigationTitle("工作详情").cubicInlineNavigationTitle()
+            .toolbar {
+                if let item = model.item(itemID) {
+                    ToolbarItem(placement: .primaryAction) { moreMenu(item) }
+                }
+            }
             .sheet(item: $sheet) { ProjectUISheetContent(sheet: $0) }
             .alert("删除这项工作？", isPresented: $delete) {
                 Button("删除工作", role: .destructive) {
@@ -124,6 +82,64 @@ struct WorkDetailView: View {
                     }
                 }
             }
+    }
+
+    /// One prominent state transition, with the other everyday actions beside it.
+    @ViewBuilder private func stateActions(_ item: WorkItem) -> some View {
+        if item.status == .completed {
+            HStack(spacing: 10) {
+                Button { sheet = .historicalRecord(item) } label: { Label("补录投入", systemImage: "clock.arrow.circlepath") }
+                    .buttonStyle(.bordered).accessibilityIdentifier("work.recordHistorical")
+                Button { sheet = .rework(item) } label: { Label("开始返工", systemImage: "arrow.uturn.backward") }
+                    .buttonStyle(.bordered).accessibilityIdentifier("work.rework")
+            }
+        } else {
+            VStack(spacing: 10) {
+                if item.status == .inProgress {
+                    Button { sheet = .record(item) } label: { Label("暂停并记录进展", systemImage: "pause.fill").frame(maxWidth: .infinity, minHeight: 34) }
+                        .buttonStyle(.borderedProminent).foregroundStyle(Color.cubicOnAccent).accessibilityIdentifier("work.pauseFeedback")
+                } else {
+                    Button { sheet = .startFeedback(item) } label: { Label("现在开始", systemImage: "play.fill").frame(maxWidth: .infinity, minHeight: 34) }
+                        .buttonStyle(.borderedProminent).foregroundStyle(Color.cubicOnAccent)
+                        .disabled(model.isBlocked(item.id)).accessibilityIdentifier("work.start")
+                }
+                HStack(spacing: 10) {
+                    Button { sheet = .trial(itemID) } label: { Label("试算", systemImage: "cube.transparent").frame(maxWidth: .infinity) }
+                        .accessibilityIdentifier("work.trial")
+                    if model.workspace.currentNextAction?.itemID == itemID {
+                        Label("当前下一步", systemImage: "arrow.right.circle.fill").font(.subheadline).foregroundStyle(Color.cubicAccent)
+                            .frame(maxWidth: .infinity)
+                    } else {
+                        ProjectMutationButton("设为下一步", symbol: "arrow.right.circle", identifier: "work.choose") {
+                            try $0.chooseNextAction(itemID: itemID, now: Date(), displayedItemIDs: [itemID], dataVersion: model.sourceVersion, impactWasVerified: false, note: "详情直接选择，未核验投入影响")
+                        }.frame(maxWidth: .infinity)
+                    }
+                    Button { complete = true } label: { Label("完成", systemImage: "checkmark.circle").frame(maxWidth: .infinity) }
+                        .accessibilityIdentifier("work.complete")
+                }.buttonStyle(.bordered)
+            }.padding(.vertical, 4)
+        }
+    }
+
+    private func moreMenu(_ item: WorkItem) -> some View {
+        Menu {
+            Button("编辑工作", systemImage: "pencil") { sheet = .editItem(item) }.accessibilityIdentifier("work.edit")
+            if item.status != .completed && item.effectiveDisposition == .active {
+                Button("记录投入与剩余", systemImage: "clock.badge.checkmark") { sheet = .record(item) }.accessibilityIdentifier("work.record")
+                if item.status == .inProgress {
+                    Button("继续这项工作", systemImage: "play") { sheet = .startFeedback(item) }.accessibilityIdentifier("work.resume")
+                }
+                Button("开始返工", systemImage: "arrow.uturn.backward") { sheet = .rework(item) }
+            }
+            Button(item.effectiveDisposition == .deferred ? "恢复工作" : "留到以后再做", systemImage: "tray") {
+                disposition = item.effectiveDisposition == .deferred ? "active" : "deferred"
+            }.accessibilityIdentifier("work.defer")
+            Button("创建独立副本", systemImage: "doc.on.doc") { copy = true }.accessibilityIdentifier("work.copy")
+            Divider()
+            Button("删除工作", systemImage: "trash", role: .destructive) { delete = true }
+                .disabled(model.saving).accessibilityIdentifier("work.delete")
+        } label: { Label("更多", systemImage: "ellipsis.circle") }
+            .accessibilityIdentifier("work.more")
     }
 }
 
@@ -376,5 +392,71 @@ struct WorkStartFeedbackView: View {
                     .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() }.disabled(submitting) } }
             }.interactiveDismissDisabled(submitting).modifier(ModalMessages())
         }
+    }
+}
+
+/// Name, where it belongs and its current facts.
+private struct WorkDetailHeader: View {
+    let item: WorkItem
+    @Environment(AppModel.self) private var model
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ProjectListTitle(text: item.name, showsFullName: true).font(.title3.weight(.semibold))
+            Text(model.workContext(item)).font(.subheadline).foregroundStyle(.secondary)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 6) { chips }
+                VStack(alignment: .leading, spacing: 4) { chips }
+            }
+            if let description = item.description, !description.isEmpty {
+                Text(description).font(.callout).fixedSize(horizontal: false, vertical: true)
+            }
+            if let date = item.deadline {
+                ProjectDeadlineDisplay(date: date, timeZoneID: item.deadlineTimeZoneID, dateOnly: item.deadlineIsDateOnly == true)
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }.padding(.vertical, 4)
+    }
+    @ViewBuilder private var chips: some View {
+        StatusChip(text: ProjectUI.statusLabel(item, blocked: !ProjectUI.predecessorsSatisfied(item.id, in: model.workspace)),
+                   tint: item.status == .inProgress ? .cubicAccent : .secondary)
+        StatusChip(text: "剩余 \(shortMinutesLabel(item.remainingMinutes))")
+        if item.energy != .normal { StatusChip(text: ProjectUI.energyLabel(item.energy)) }
+        if !item.required { StatusChip(text: "非必需") }
+        if item.currentRound > 1 { StatusChip(text: "第 \(item.currentRound) 轮") }
+        if item.isFocused == true { StatusChip(text: "关注", tint: .cubicAccent, symbol: "star.fill") }
+    }
+}
+
+struct WorkHistoryView: View {
+    let itemID: String
+    @Environment(AppModel.self) private var model
+    var body: some View {
+        List {
+            if let item = model.item(itemID) {
+                if let date = item.started { ProjectInfoLine(title: "首次开始", value: ProjectUI.dateLabel(date)) }
+                if let date = item.completedAt { ProjectInfoLine(title: "本轮完成", value: ProjectUI.dateLabel(date)) }
+                Section("下一步选择记录") {
+                    ForEach(model.workspace.choices?.filter { $0.itemID == itemID }.sorted { $0.date > $1.date } ?? [], id: \.id) { choice in
+                        NavigationLink { ChoiceDetailView(choice: choice) } label: { ProjectInfoLine(title: choice.impactWasVerified ? "已试算后选择" : "直接选择，未试算影响", value: ProjectUI.dateLabel(choice.date)).frame(minHeight: 44) }.accessibilityIdentifier("work.choice.\(choice.id)")
+                    }
+                }
+                WorkEstimateHistorySection(itemID: itemID)
+                WorkEffortHistorySection(itemID: itemID)
+                Section("历次工作与返工") {
+                    ForEach(model.workspace.workRounds?.filter { $0.itemID == itemID }.sorted { $0.round > $1.round } ?? [], id: \.id) { round in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("第 \(round.round) 轮").font(.headline)
+                            if let date = round.startedAt { ProjectInfoLine(title: "当轮开始时间", value: ProjectUI.dateLabel(date)) }
+                            if let date = round.completedAt { ProjectInfoLine(title: "当轮完成时间", value: ProjectUI.dateLabel(date)) }
+                        }.accessibilityIdentifier("work.round.\(round.id)")
+                    }
+                    ForEach(model.workspace.reviews?.filter { $0.itemID == itemID } ?? [], id: \.id) { review in
+                        ProjectInfoLine(title: review.outcome == .stillValid ? "已确认成果仍可用" : "等待前置恢复", value: "\(ProjectUI.dateLabel(review.date))\n\(review.note)")
+                            .accessibilityIdentifier("work.review.history.\(review.id)")
+                    }
+                }
+            }
+        }
+        .cubicNavigationTitle("历史").cubicInlineNavigationTitle()
     }
 }

@@ -27,19 +27,20 @@ import XCTest
         shot("01-fresh-empty", app)
         dismissStartCard(app)
 
-        app.buttons["收件箱"].tap()
+        app.buttons["capture.open"].firstMatch.tap()
         let title = app.descendants(matching: .any)["inbox.quick.title"].firstMatch
         XCTAssertTrue(title.waitForExistence(timeout: 10), app.debugDescription)
         title.tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5) || title.value(forKey: "hasKeyboardFocus") as? Bool == true, app.debugDescription)
         title.typeText("验证同步改写")
         app.buttons["inbox.quick.save"].firstMatch.tap()
+        app.buttons["待处理"].tap()
         XCTAssertTrue(app.staticTexts["验证同步改写"].firstMatch.waitForExistence(timeout: 10), app.debugDescription)
         shot("02-work-added", app)
 
         app.terminate(); app.launch()
-        XCTAssertTrue(app.buttons["收件箱"].waitForExistence(timeout: 30))
-        app.buttons["收件箱"].tap()
+        XCTAssertTrue(app.buttons["待处理"].waitForExistence(timeout: 30))
+        app.buttons["待处理"].tap()
         XCTAssertTrue(app.staticTexts["验证同步改写"].firstMatch.waitForExistence(timeout: 10), "Work survives relaunch")
         shot("03-after-relaunch", app)
     }

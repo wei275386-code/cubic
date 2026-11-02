@@ -392,6 +392,7 @@ struct AvailableWorkSection: View {
             ForEach(Array(available.prefix(limit ?? available.count)), id: \.id) { item in
                 HStack(spacing: 10) {
                     NavigationLink { WorkDetailView(itemID: item.id) } label: { ActionRow(item: item) }
+                        .accessibilityIdentifier("action.item.\(item.id)")
                     Button("试算") { trialID = item.id }
                         .buttonStyle(.bordered).controlSize(.small)
                         .accessibilityLabel("试算 \(item.name)").accessibilityIdentifier("action.trial.\(item.id)")

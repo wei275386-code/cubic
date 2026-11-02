@@ -6,6 +6,7 @@ import XCTest
     func testMarkdownQuickCreateValidatesPreviewsAndPersistsStructure() throws {
         let app = launchQA()
         openProjectTab(app)
+        XCTAssertTrue(app.buttons["projects.menu"].waitForExistence(timeout: 10)); app.buttons["projects.menu"].tap()
         let create = app.buttons["projects.createMarkdown"]
         XCTAssertTrue(create.waitForExistence(timeout: 10)); create.tap()
         let source = app.textViews["editor.markdown.source"]
@@ -117,9 +118,10 @@ import XCTest
     }
     func testActionsHideArchivedProjectWorkAndRestoreIt() throws {
         let app = launchQA()
-        XCTAssertTrue(app.buttons["行动"].waitForExistence(timeout: 20))
-        app.buttons["行动"].tap()
+        XCTAssertTrue(app.buttons["今天"].waitForExistence(timeout: 20))
+        app.buttons["今天"].tap()
         for id in ["qa-drag", "qa-delete"] {
+            reveal(app, app.buttons["action.trial.\(id)"])
             XCTAssertTrue(app.buttons["action.trial.\(id)"].waitForExistence(timeout: 15))
         }
         openProjectTab(app)
@@ -132,8 +134,9 @@ import XCTest
         app.buttons["project.operations"].tap()
         XCTAssertTrue(app.buttons["恢复显示"].waitForExistence(timeout: 10))
         app.tap()
-        app.buttons["行动"].tap()
-        XCTAssertTrue(app.staticTexts["暂时没有可开始的工作"].waitForExistence(timeout: 10))
+        app.buttons["今天"].tap()
+        reveal(app, app.staticTexts["暂时没有可开始的工作"].firstMatch)
+        XCTAssertTrue(app.staticTexts["暂时没有可开始的工作"].firstMatch.waitForExistence(timeout: 10))
         for id in ["qa-drag", "qa-delete"] { XCTAssertFalse(app.buttons["action.trial.\(id)"].exists) }
         XCTAssertFalse(app.staticTexts["QA 工作删除与日历"].exists, "Archived project scheduling reminders must disappear immediately")
         capture("actions-project-archived")
@@ -141,14 +144,16 @@ import XCTest
         app.terminate()
         app.launchArguments = ["-CubicWorkCalendarQA"]
         app.launch()
-        XCTAssertTrue(app.buttons["行动"].waitForExistence(timeout: 20))
-        app.buttons["行动"].tap()
-        XCTAssertTrue(app.staticTexts["暂时没有可开始的工作"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["今天"].waitForExistence(timeout: 20))
+        app.buttons["今天"].tap()
+        reveal(app, app.staticTexts["暂时没有可开始的工作"].firstMatch)
+        XCTAssertTrue(app.staticTexts["暂时没有可开始的工作"].firstMatch.waitForExistence(timeout: 10))
         for id in ["qa-drag", "qa-delete"] { XCTAssertFalse(app.buttons["action.trial.\(id)"].exists) }
         XCTAssertFalse(app.staticTexts["QA 工作删除与日历"].exists)
 
         openProjectTab(app)
         let includeArchived = app.switches["projects.includeArchived"]
+        reveal(app, includeArchived)
         XCTAssertTrue(includeArchived.waitForExistence(timeout: 10))
         includeArchived.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
         XCTAssertTrue(project.waitForExistence(timeout: 10)); project.tap()
@@ -158,8 +163,9 @@ import XCTest
         app.buttons["project.operations"].tap()
         XCTAssertTrue(app.buttons["归档项目"].waitForExistence(timeout: 10))
         app.tap()
-        app.buttons["行动"].tap()
+        app.buttons["今天"].tap()
         for id in ["qa-delete"] {
+            reveal(app, app.buttons["action.trial.\(id)"])
             XCTAssertTrue(app.buttons["action.trial.\(id)"].waitForExistence(timeout: 15))
         }
         capture("actions-project-restored")
@@ -205,18 +211,18 @@ import XCTest
         XCTAssertTrue(app.navigationBars["项目详情"].waitForExistence(timeout: 10))
     }
 
-    /// 优化三：行动页“现在可开始”位于第一个内容区。
-    func testActionsPutsAvailableFirst() throws {
+    /// 今天页：当前下一步与提醒在首屏，“现在可开始”仍可滚动到达。
+    func testTodayPutsNextActionFirst() throws {
         let app = launchQA()
-        XCTAssertTrue(app.buttons["行动"].waitForExistence(timeout: 20))
-        app.buttons["行动"].tap()
+        XCTAssertTrue(app.buttons["今天"].waitForExistence(timeout: 20))
+        app.buttons["今天"].tap()
+        let next = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "next.")).firstMatch
+        XCTAssertTrue(next.waitForExistence(timeout: 15), "今天页应显示当前下一步：\(app.debugDescription)")
+        XCTAssertLessThan(next.frame.minY, app.frame.height * 0.5, "当前下一步应位于首屏上半部分")
+        capture("today-next-action-first")
         let available = app.staticTexts["现在可开始"]
-        XCTAssertTrue(available.waitForExistence(timeout: 15), "行动页应显示“现在可开始”：\(app.debugDescription)")
-        capture("actions-available-first")
-        XCTAssertLessThan(available.frame.minY, app.frame.height * 0.85, "“现在可开始”应位于首个内容区（页头之后）")
-        // 回顾与跟进已移到末尾：初始视口内不应出现（若已渲染则须在“现在可开始”之后）。
-        let review = app.staticTexts["回顾与跟进"]
-        if review.exists { XCTAssertGreaterThan(review.frame.minY, available.frame.minY) }
+        reveal(app, available)
+        XCTAssertTrue(available.exists, "今天页应能滚动到“现在可开始”：\(app.debugDescription)")
     }
 
     /// 优化二：项目“修改详情”以缩进层级展示“节点 -> 子工作”，并能在本页新增节点。
@@ -305,7 +311,9 @@ import XCTest
         let app = launchQA()
         XCTAssertTrue(app.buttons["日历"].waitForExistence(timeout: 20))
         app.buttons["日历"].tap()
-        XCTAssertTrue(app.navigationBars["日历"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["calendar.today"].waitForExistence(timeout: 10))
+        let details = app.buttons["calendar.dayDetails"]
+        reveal(app, details); details.tap()
         let section = app.staticTexts["建议的最晚开始时间"]
         reveal(app, section)
         XCTAssertTrue(section.exists, "日历应显示“建议的最晚开始时间”：\(app.debugDescription)")
@@ -331,7 +339,9 @@ import XCTest
         XCTAssertTrue(archive.waitForExistence(timeout: 5))
         XCTAssertTrue(archive.isHittable, "应能归档项目：\(app.debugDescription)")
         archive.tap()
-        XCTAssertTrue(app.buttons["收件箱"].waitForExistence(timeout: 10)); app.buttons["收件箱"].tap()
+        XCTAssertTrue(app.buttons["待处理"].waitForExistence(timeout: 10)); app.buttons["待处理"].tap()
+        let all = app.buttons["attention.allItems"]
+        reveal(app, all); all.tap()
         let newItem = app.buttons["inbox.newItem"]
         XCTAssertTrue(newItem.waitForExistence(timeout: 10)); newItem.tap()
         XCTAssertTrue(app.navigationBars["新建工作"].waitForExistence(timeout: 10))
@@ -356,11 +366,9 @@ import XCTest
         archive.tap()
         XCTAssertTrue(app.buttons["日历"].waitForExistence(timeout: 10))
         app.buttons["日历"].tap()
-        XCTAssertTrue(app.navigationBars["日历"].waitForExistence(timeout: 10))
-        let empty = app.staticTexts["还没有项目，去项目页创建一个。"]
-        reveal(app, empty)
-        XCTAssertTrue(empty.exists, "日历项目区应无归档项目：\(app.debugDescription)")
-        XCTAssertFalse(app.descendants(matching: .any)["calendar.project.qa-project"].exists, "归档项目不应在日历残留显示")
+        XCTAssertTrue(app.buttons["calendar.today"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any)["calendar.timeline"].firstMatch.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["calendar.drag.item.qa-drag"].exists, "归档项目的工作不应在日历残留显示：\(app.debugDescription)")
         capture("calendar-hides-archived-project")
     }
 }

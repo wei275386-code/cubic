@@ -73,7 +73,7 @@ struct ProjectStructureEditorView: View {
         }
         .buttonStyle(.borderless)
         .scrollDismissesKeyboard(.interactively)
-        .cubicNavigationTitle(project?.name ?? "项目详情").cubicInlineNavigationTitle()
+        .cubicNavigationTitle("项目详情").cubicInlineNavigationTitle()
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
                 Spacer()

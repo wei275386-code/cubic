@@ -67,7 +67,7 @@ struct AttentionView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button("记录一件事", systemImage: "plus") { navigation.capture = true }
-                    .accessibilityIdentifier("inbox.newItem")
+                    .accessibilityIdentifier("attention.capture")
             }
         }
         .sheet(item: $sheet) { ProjectUISheetContent(sheet: $0) }
