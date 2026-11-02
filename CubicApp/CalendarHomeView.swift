@@ -322,15 +322,17 @@ struct NextActionCard: View {
                     Text(model.workContext(item)).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                 }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
             }.buttonStyle(.plain).accessibilityIdentifier("next.item.\(item.id)")
-            HStack(spacing: 8) {
-                Label(shortMinutesLabel(item.remainingMinutes), systemImage: "clock").font(.subheadline.weight(.medium)).monospacedDigit()
-                    .labelStyle(.titleAndIcon).fixedSize()
-                if item.status == .inProgress { StatusChip(text: "进行中", tint: .cubicAccent) }
-                if item.energy != .normal { StatusChip(text: ProjectUI.energyLabel(item.energy)) }
-                Spacer(minLength: 4)
-                Button("试算") { sheet = .trial(item.id) }
-                    .buttonStyle(.bordered).accessibilityIdentifier("next.trial")
-                primaryButton(item, chosen: chosen)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    facts(item)
+                    Spacer(minLength: 4)
+                    actions(item, chosen: chosen)
+                }
+                // Large text: facts above, actions below.
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) { facts(item) }
+                    HStack(spacing: 8) { actions(item, chosen: chosen) }
+                }
             }
             if let choice {
                 Button { showsChoice = true } label: {
@@ -340,6 +342,17 @@ struct NextActionCard: View {
                     .accessibilityIdentifier("actions.choice.record.\(choice.id).count.\(model.workspace.choices?.count ?? 0)")
             }
         }.glassCard(tint: .cubicAccent)
+    }
+    @ViewBuilder private func facts(_ item: WorkItem) -> some View {
+        Label(shortMinutesLabel(item.remainingMinutes), systemImage: "clock").font(.subheadline.weight(.medium)).monospacedDigit()
+            .labelStyle(.titleAndIcon).fixedSize()
+        if item.status == .inProgress { StatusChip(text: "进行中", tint: .cubicAccent) }
+        if item.energy != .normal { StatusChip(text: ProjectUI.energyLabel(item.energy)) }
+    }
+    @ViewBuilder private func actions(_ item: WorkItem, chosen: Bool) -> some View {
+        Button("试算") { sheet = .trial(item.id) }
+            .buttonStyle(.bordered).accessibilityIdentifier("next.trial")
+        primaryButton(item, chosen: chosen)
     }
     @ViewBuilder private func primaryButton(_ item: WorkItem, chosen: Bool) -> some View {
         if !chosen {
@@ -378,7 +391,7 @@ struct AttentionStrip: View {
             Button { navigation.section = .attention } label: {
                 HStack(spacing: 8) {
                     Image(systemName: summary.dueFollowUps.isEmpty ? "exclamationmark.circle.fill" : "flag.fill")
-                    Text(headline).fontWeight(.semibold).lineLimit(vertical ? 2 : 1)
+                    Text(headline).fontWeight(.semibold).lineLimit(2)
                     Spacer(minLength: 4)
                     if summary.count > 1 { Text("+\(summary.count - 1)").font(.caption.weight(.semibold)) }
                     Image(systemName: "chevron.right").font(.caption.weight(.semibold))

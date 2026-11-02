@@ -18,6 +18,10 @@ import XCTest
         let calendar = app.staticTexts["mac.sidebar.calendar"]
         XCTAssertTrue(calendar.waitForExistence(timeout: 5))
         calendar.click()
+        // The week grid shows several timelines; open today's single-day timeline so the drop lands in today's capacity.
+        let today = app.descendants(matching: .any)["calendar.week.day.\(Calendar.current.component(.day, from: Date()))"].firstMatch
+        XCTAssertTrue(today.waitForExistence(timeout: 10))
+        today.click()
         attach(app, named: "native-calendar-before-drag")
         let tree = XCTAttachment(string: app.debugDescription)
         tree.name = "native-calendar-accessibility"; tree.lifetime = .keepAlways; add(tree)

@@ -103,22 +103,28 @@ struct WorkDetailView: View {
                         .buttonStyle(.borderedProminent).foregroundStyle(Color.cubicOnAccent)
                         .disabled(model.isBlocked(item.id)).accessibilityIdentifier("work.start")
                 }
-                HStack(spacing: 10) {
-                    Button { sheet = .trial(itemID) } label: { Label("试算", systemImage: "cube.transparent").frame(maxWidth: .infinity) }
-                        .accessibilityIdentifier("work.trial")
-                    if model.workspace.currentNextAction?.itemID == itemID {
-                        Label("当前下一步", systemImage: "arrow.right.circle.fill").font(.subheadline).foregroundStyle(Color.cubicAccent)
-                            .frame(maxWidth: .infinity)
-                    } else {
-                        ProjectMutationButton("设为下一步", symbol: "arrow.right.circle", identifier: "work.choose") {
-                            try $0.chooseNextAction(itemID: itemID, now: Date(), displayedItemIDs: [itemID], dataVersion: model.sourceVersion, impactWasVerified: false, note: "详情直接选择，未核验投入影响")
-                        }.frame(maxWidth: .infinity)
-                    }
-                    Button { complete = true } label: { Label("完成", systemImage: "checkmark.circle").frame(maxWidth: .infinity) }
-                        .accessibilityIdentifier("work.complete")
+                // Large text stacks the actions instead of wrapping each label character by character.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 10) { secondaryActions(item) }
+                    VStack(alignment: .leading, spacing: 8) { secondaryActions(item) }
                 }.buttonStyle(.bordered)
             }.padding(.vertical, 4)
         }
+    }
+
+    @ViewBuilder private func secondaryActions(_ item: WorkItem) -> some View {
+        Button { sheet = .trial(itemID) } label: { Label("试算", systemImage: "cube.transparent").frame(maxWidth: .infinity) }
+            .accessibilityIdentifier("work.trial")
+        if model.workspace.currentNextAction?.itemID == itemID {
+            Label("当前下一步", systemImage: "arrow.right.circle.fill").font(.subheadline).foregroundStyle(Color.cubicAccent)
+                .frame(maxWidth: .infinity)
+        } else {
+            ProjectMutationButton("设为下一步", symbol: "arrow.right.circle", identifier: "work.choose") {
+                try $0.chooseNextAction(itemID: itemID, now: Date(), displayedItemIDs: [itemID], dataVersion: model.sourceVersion, impactWasVerified: false, note: "详情直接选择，未核验投入影响")
+            }.frame(maxWidth: .infinity)
+        }
+        Button { complete = true } label: { Label("完成", systemImage: "checkmark.circle").frame(maxWidth: .infinity) }
+            .accessibilityIdentifier("work.complete")
     }
 
     private func moreMenu(_ item: WorkItem) -> some View {

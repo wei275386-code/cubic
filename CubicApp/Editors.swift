@@ -403,7 +403,7 @@ struct CubicWorkEditor: View {
                 }
                 Section("耗时与工作要求") {
                     if current?.status == .completed { Text("工作已完成，剩余时间为 0。需要重做时，请到详情开始返工。") }
-                    else { ProjectMinutesField(title: "耗时（分钟）", text: $remaining, identifier: "editor.item.remaining") }
+                    else { ProjectMinutesField(title: "耗时（分钟）", text: $remaining, identifier: "editor.item.remaining", placeholder: itemID == nil ? "留空按 60 分钟" : "留空保持不变") }
                     Picker("精力要求", selection: $energy) {
                         Text("低负荷").tag(Energy.low.rawValue); Text("普通").tag(Energy.normal.rawValue); Text("高专注").tag(Energy.high.rawValue)
                     }.frame(minHeight: 44).accessibilityIdentifier("editor.item.energy")
@@ -451,7 +451,7 @@ struct CubicWorkEditor: View {
         value.deadlineTimeZoneID = zone; value.deadlineIsDateOnly = dateOnly
         do { value.deadline = hasDeadline ? try ProjectUI.deadline(deadline, zone: zone, dateOnly: dateOnly) : nil }
         catch { model.errorMessage = error.localizedDescription; return false }
-        let minutes = current?.status == .completed ? 0 : ProjectUI.optionalMinutes(remaining) ?? 60
+        let minutes = current?.status == .completed ? 0 : ProjectUI.optionalMinutes(remaining) ?? current?.remainingMinutes ?? 60
         if itemID == nil { value.remainingMinutes = minutes; value.initialMinutes = minutes }
         let savedValue = value; let id = itemID; let memo = note
         return await model.mutate { workspace in
