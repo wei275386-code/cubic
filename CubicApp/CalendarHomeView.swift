@@ -265,6 +265,9 @@ struct NextActionCard: View {
     var compact = false
     @Environment(AppModel.self) private var model
     @State private var sheet: ProjectUISheet?
+    /// Buttons + destinations instead of NavigationLink keep List from styling the card as a disclosure row.
+    @State private var openedItemID: String?
+    @State private var showsChoice = false
     private var choice: NextActionChoice? {
         guard let choice = model.workspace.currentNextAction, let id = choice.itemID,
               let item = model.item(id), item.status != .completed else { return nil }
@@ -280,6 +283,8 @@ struct NextActionCard: View {
         }
         .padding(.horizontal, compact ? 0 : 16)
         .sheet(item: $sheet) { ProjectUISheetContent(sheet: $0) }
+        .navigationDestination(item: $openedItemID) { WorkDetailView(itemID: $0) }
+        .navigationDestination(isPresented: $showsChoice) { if let choice { ChoiceDetailView(choice: choice) } }
     }
     private func card(_ item: WorkItem) -> some View {
         let chosen = choice != nil
@@ -295,7 +300,7 @@ struct NextActionCard: View {
                     }.buttonStyle(.plain).accessibilityLabel("取消当前选择").accessibilityIdentifier("actions.clearChoice")
                 }
             }
-            NavigationLink { WorkDetailView(itemID: item.id) } label: {
+            Button { openedItemID = item.id } label: {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(item.name).font(compact ? .title3.weight(.bold) : .title2.weight(.bold)).foregroundStyle(.primary)
                         .lineLimit(2).multilineTextAlignment(.leading)
@@ -313,7 +318,7 @@ struct NextActionCard: View {
                 primaryButton(item, chosen: chosen)
             }
             if let choice {
-                NavigationLink { ChoiceDetailView(choice: choice) } label: {
+                Button { showsChoice = true } label: {
                     Text("选择于 \(choice.date.formatted(date: .omitted, time: .shortened)) · 查看记录")
                         .font(.caption).foregroundStyle(.secondary)
                 }.buttonStyle(.plain)
