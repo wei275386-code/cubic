@@ -36,14 +36,7 @@ struct ProjectStructureEditorView: View {
         let structure = model.workspace.projectStructure(projectID: projectID)
         List {
             if let project {
-                VStack(alignment: .leading, spacing: 6) {
-                    ProjectListTitle(text: project.name, showsFullName: true)
-                    if let description = project.description, !description.isEmpty { Text(description).foregroundStyle(.secondary) }
-                    Text("\(ProjectUI.projectStatus(project.effectiveStatus)) · \(ProjectUI.importance(project.importance))").font(.caption).foregroundStyle(.secondary)
-                    if project.deadline != nil {
-                        ProjectDeadlineDisplay(date: project.deadline, timeZoneID: project.deadlineTimeZoneID, dateOnly: project.deadlineIsDateOnly == true)
-                    }
-                }
+                ProjectHeader(project: project)
                 if structure.nodes.count > 1 {
                     Button { ordering = true } label: { Label("调整节点顺序", systemImage: "arrow.up.arrow.down").frame(minHeight: 44) }
                         .accessibilityIdentifier("project.structure.reorderNodes")
@@ -80,7 +73,7 @@ struct ProjectStructureEditorView: View {
         }
         .buttonStyle(.borderless)
         .scrollDismissesKeyboard(.interactively)
-        .cubicNavigationTitle("项目详情").cubicInlineNavigationTitle()
+        .cubicNavigationTitle(project?.name ?? "项目详情").cubicInlineNavigationTitle()
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
                 Spacer()
@@ -92,7 +85,6 @@ struct ProjectStructureEditorView: View {
                         Button("编辑项目属性", systemImage: "pencil") { sheet = .project(project) }
                         Button("保存为模板", systemImage: "doc.on.doc") { sheet = .saveProjectTemplate(projectID: projectID) }
                             .accessibilityIdentifier("project.saveTemplate")
-                        NavigationLink { CalendarView() } label: { Label("查看日历安排", systemImage: "calendar") }
                         NavigationLink { RiskOverviewView(projectID: projectID) } label: { Label("排期问题", systemImage: "calendar.badge.exclamationmark") }
                         NavigationLink { SharedReferencesView(projectID: projectID, nodeID: nil) } label: { Label("关联已有工作或节点", systemImage: "link") }
                         if project.effectiveStatus == .completed {
@@ -174,7 +166,7 @@ private struct CompactNodeRow: View {
             focused.wrappedValue = nil
             showInfo = true
         } label: {
-            Text("ℹ️").font(.title3).frame(minWidth: 44, minHeight: 44)
+            Image(systemName: "info.circle").font(.body).foregroundStyle(Color.cubicAccent).frame(minWidth: 44, minHeight: 44)
         }
         .accessibilityLabel("详情")
         .accessibilityIdentifier("project.structure.node.info.\(node.id)")
@@ -395,7 +387,7 @@ private struct CompactWorkRow: View {
             focused.wrappedValue = nil
             showInfo = true
         } label: {
-            Text("ℹ️").font(.title3).frame(minWidth: 44, minHeight: 44)
+            Image(systemName: "info.circle").font(.body).foregroundStyle(Color.cubicAccent).frame(minWidth: 44, minHeight: 44)
         }
         .accessibilityLabel("详情")
         .accessibilityIdentifier("project.structure.item.info.\(itemID)")

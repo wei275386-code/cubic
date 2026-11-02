@@ -74,40 +74,74 @@ struct ProjectsView: View {
     @State private var pendingCreatedProjectID: String?
     @State private var createdProjectID: String?
     @State private var includeArchived = false
+    private var projects: [Project] {
+        model.workspace.projects.filter { includeArchived || !$0.archived }
+            .sorted { lhs, rhs in
+                let left = model.health(ofProject: lhs.id).urgency, right = model.health(ofProject: rhs.id).urgency
+                if left != right { return left < right }
+                return (lhs.deadline ?? .distantFuture) < (rhs.deadline ?? .distantFuture)
+            }
+    }
     var body: some View {
         List {
             Section {
-                NavigationLink { ProjectTemplatesView() } label: {
-                    Label("从模板创建", systemImage: "doc.on.doc").frame(minHeight: 44)
-                }.accessibilityIdentifier("projects.templates")
-                Button { sheet = .markdownProject { pendingCreatedProjectID = $0 } } label: {
-                    Label("从 Markdown 快速创建", systemImage: "text.badge.plus").frame(minHeight: 44)
-                }.accessibilityIdentifier("projects.createMarkdown")
-                NavigationLink { ReviewView() } label: { Label("待处理事项", systemImage: "arrow.clockwise").frame(minHeight: 44) }
-                    .accessibilityIdentifier("projects.review")
-                NavigationLink { WaitingView() } label: { Label("外部等待", systemImage: "hourglass").frame(minHeight: 44) }
-                    .accessibilityIdentifier("projects.waiting")
-                Toggle("包含归档项目", isOn: $includeArchived).frame(minHeight: 44).accessibilityIdentifier("projects.includeArchived")
-            }
-            Section("项目") {
-                ForEach(model.workspace.projects.filter { includeArchived || !$0.archived }, id: \.id) { project in
-                    NavigationLink { CubicProjectDetailView(projectID: project.id) } label: { ProjectSummaryRow(project: project) }
+                ForEach(projects, id: \.id) { project in
+                    NavigationLink { CubicProjectDetailView(projectID: project.id) } label: { ProjectCardRow(project: project) }
                         .accessibilityIdentifier("projects.project.\(project.id)")
                 }
-                if model.workspace.projects.isEmpty { Text("还没有项目。点击右上角创建，也可以先在收件箱记下第一步。").foregroundStyle(.secondary) }
+                if model.workspace.projects.isEmpty {
+                    EmptyMessage(symbol: "square.stack.3d.up", title: "还没有项目", detail: "点右上角创建，或从模板、Markdown 开始。")
+                }
             }
         }
         .cubicNavigationTitle("项目")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button { sheet = .newProject { pendingCreatedProjectID = $0 } } label: { Label("创建项目", systemImage: "plus").frame(minWidth: 44, minHeight: 44) }
-                    .accessibilityIdentifier("projects.create")
+                Menu {
+                    Button("新建项目", systemImage: "plus") { sheet = .newProject { pendingCreatedProjectID = $0 } }
+                        .accessibilityIdentifier("projects.create")
+                    NavigationLink { ProjectTemplatesView() } label: { Label("从模板创建", systemImage: "doc.on.doc") }
+                        .accessibilityIdentifier("projects.templates")
+                    Button("从 Markdown 快速创建", systemImage: "text.badge.plus") { sheet = .markdownProject { pendingCreatedProjectID = $0 } }
+                        .accessibilityIdentifier("projects.createMarkdown")
+                    Divider()
+                    Toggle("包含归档项目", isOn: $includeArchived).accessibilityIdentifier("projects.includeArchived")
+                } label: { Label("创建项目", systemImage: "plus") }
+                    .accessibilityIdentifier("projects.menu")
             }
         }
         .sheet(item: $sheet, onDismiss: {
             if let id = pendingCreatedProjectID { pendingCreatedProjectID = nil; createdProjectID = id }
         }) { ProjectUISheetContent(sheet: $0) }
         .navigationDestination(item: $createdProjectID) { id in CubicProjectDetailView(projectID: id) }
+    }
+}
+
+/// List row: progress ring, name, deadline and one health verdict.
+struct ProjectCardRow: View {
+    let project: Project
+    @Environment(AppModel.self) private var model
+    var body: some View {
+        let health = model.health(ofProject: project.id)
+        HStack(spacing: 12) {
+            ProgressRing(fraction: model.progress(ofProject: project.id), size: 40, lineWidth: 4, tint: health.tint, showsLabel: true)
+            VStack(alignment: .leading, spacing: 4) {
+                ProjectListTitle(text: project.name)
+                    .font(.body.weight(.semibold))
+                Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            HealthChip(health: health)
+        }.padding(.vertical, 4)
+    }
+    private var detail: String {
+        var parts: [String] = []
+        if let date = project.deadline { parts.append("截止 \(ProjectUI.datePart(date, zone: project.deadlineTimeZoneID))") }
+        let ids = model.projectItemIDs(project.id)
+        let remaining = model.workspace.items.filter { ids.contains($0.id) && $0.status != .completed && !$0.archived && $0.effectiveDisposition != .cancelled }
+        if !remaining.isEmpty { parts.append("剩 \(remaining.count) 项 · \(shortMinutesLabel(remaining.reduce(0) { $0 + ($1.remainingMinutes ?? 0) }))") }
+        if project.archived { parts.append("已归档") }
+        return parts.isEmpty ? ProjectUI.projectStatus(project.effectiveStatus) : parts.joined(separator: " · ")
     }
 }
 
@@ -141,11 +175,6 @@ struct ProjectSummaryRow: View {
         .font(.subheadline).fixedSize(horizontal: false, vertical: true)
         .frame(minHeight: 44, alignment: .leading).padding(.vertical, 4)
     }
-}
-
-struct CubicProjectDetailView: View {
-    let projectID: String
-    var body: some View { ProjectStructureEditorView(projectID: projectID) }
 }
 
 struct CubicNodeDetailView: View {

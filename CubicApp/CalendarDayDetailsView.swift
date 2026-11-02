@@ -1,86 +1,25 @@
 import SwiftUI
 import CubicCore
 
-struct CalendarView: View {
+/// Secondary calendar layers for one day: free slots, Apple Calendar occupancy,
+/// deadlines, latest starts, waits, the last trial and recorded effort.
+struct CalendarDayDetailsView: View {
+    let day: Date
+    let itemIDs: Set<String>
     @Environment(AppModel.self) private var model
-    @State private var day = Date()
-    @State private var selectedProjectIDs: Set<String> = []
-    @State private var showAllProjects = true
     @State private var showSelectedTrial = true
-    private var cal: Calendar { var value = Calendar(identifier: .gregorian); value.timeZone = model.preferences.workTimeZone; return value }
-    private var events: [BusyEvent] {
-        let start = cal.startOfDay(for: day), end = cal.date(byAdding: .day, value: 1, to: start)!
-        return model.calendar.events.filter { $0.start < end && $0.end > start }
-    }
-    private var slots: [CapacitySlot] {
-        let start = cal.startOfDay(for: day)
-        let end = cal.date(byAdding: .day, value: 1, to: start)!
-        // The planner can coalesce adjacent days. Display only the selected
-        // day's intersection, including slots that began on an earlier day.
-        return model.visibleCapacitySlots.compactMap { slot in
-            let lower = max(start, slot.start), upper = min(end, slot.end)
-            guard lower < upper else { return nil }
-            return CapacitySlot(start: lower, end: upper, energy: slot.energy)
-        }
-    }
-    /// 日历只显示未归档项目；归档/取消的旧数据不再残留显示（与项目页默认隐藏归档一致）。
+    private var cal: Calendar { model.workCalendar }
+    private var events: [BusyEvent] { model.busyEvents(on: day) }
+    private var slots: [CapacitySlot] { model.capacitySlots(on: day) }
     private var projects: [Project] {
-        model.workspace.projects.filter { (showAllProjects || selectedProjectIDs.contains($0.id)) && !$0.archived }
-    }
-    /// 日历只显示未归档、未取消的工作（旧归档数据不再残留）。
-    private func isCalendarVisible(_ id: String) -> Bool {
-        guard let item = model.item(id) else { return false }
-        return !item.archived && item.effectiveDisposition != .cancelled
-    }
-    private var visibleItemIDs: Set<String> {
-        let projectItems = projects.reduce(into: Set<String>()) { result, project in
-            result.formUnion(model.projectItemIDs(project.id).filter { isCalendarVisible($0) })
+        model.workspace.projects.filter { project in
+            let members = model.projectItemIDs(project.id)
+            return !project.archived && (members.isEmpty || !members.isDisjoint(with: itemIDs))
         }
-        return projectItems.union(model.workspace.items.filter {
-            showAllProjects && $0.projectIDs.isEmpty && isCalendarVisible($0.id)
-        }.map(\.id))
     }
-    private var dayAllocations: [TrialAllocation] {
-        let ids = visibleItemIDs
-        return model.planning?.witness.allocations.filter {
-            ids.contains($0.itemID) && cal.isDate($0.start, inSameDayAs: day)
-        } ?? []
-    }
+    private func isCalendarVisible(_ id: String) -> Bool { itemIDs.contains(id) }
     var body: some View {
         List {
-            Section("工作时间块") {
-                DatePicker("查看日期", selection: $day, displayedComponents: .date)
-                    .datePickerStyle(.compact)
-                    .environment(\.calendar, cal)
-                    .environment(\.timeZone, cal.timeZone)
-                Text("工作时区：\(cal.timeZone.identifier)").font(.caption).foregroundStyle(.secondary)
-                HStack {
-                    Button("前一天", systemImage: "chevron.left") { moveDay(-1) }
-                    Spacer()
-                    Button("今天") { day = Date() }
-                    Spacer()
-                    Button("后一天", systemImage: "chevron.right") { moveDay(1) }
-                }.buttonStyle(.borderless).padding(.vertical, 5)
-                CalendarTimelineView(day: day, calendar: cal, slots: slots, events: events,
-                                     itemIDs: visibleItemIDs, allocations: dayAllocations)
-            }
-            Section {
-                DisclosureGroup("显示哪些项目") {
-                    Toggle("显示所有项目", isOn: $showAllProjects)
-                        .onChange(of: showAllProjects) { _, all in
-                            if !all && selectedProjectIDs.isEmpty { selectedProjectIDs = Set(model.workspace.projects.map(\.id)) }
-                        }
-                    if !showAllProjects {
-                        ForEach(model.workspace.projects.filter { !$0.archived }, id: \.id) { project in
-                            Toggle(project.name, isOn: Binding(get: { selectedProjectIDs.contains(project.id) }, set: { selected in
-                                if selected { selectedProjectIDs.insert(project.id) } else { selectedProjectIDs.remove(project.id) }
-                            }))
-                        }
-                    }
-                }
-                Text("筛选只影响显示，排期仍会考虑所有项目。")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
             CalendarIntegrationStatusSection()
             Section("可用时间") {
                 if slots.isEmpty {
@@ -130,31 +69,6 @@ struct CalendarView: View {
                         .font(.caption2).foregroundStyle(.secondary)
                 }
             }
-            Section {
-                if projects.isEmpty { Text("还没有项目，去项目页创建一个。") }
-                ForEach(projects, id: \.id) { project in
-                    let memberIDs = model.projectItemIDs(project.id)
-                    let items = model.workspace.items.filter { memberIDs.contains($0.id) && !$0.archived && $0.effectiveDisposition != .cancelled && ($0.status != .completed || $0.needsReview) }
-                    DisclosureGroup {
-                        if items.isEmpty { Text("这个项目没有未完成工作").foregroundStyle(.secondary) }
-                        ForEach(items, id: \.id) { item in
-                            NavigationLink { WorkDetailView(itemID: item.id) } label: { ActionRow(item: item) }
-                                .accessibilityIdentifier("calendar.project.item.\(item.id)")
-                        }
-                    } label: {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(project.name).font(.headline)
-                            if let date = project.deadline {
-                                Text("截止 \(ProjectUI.datePart(date, zone: project.deadlineTimeZoneID)) \(ProjectUI.timePart(date, zone: project.deadlineTimeZoneID)) · \(project.deadlineTimeZoneID ?? "原记录时区未注明")")
-                                    .font(.caption).foregroundStyle(date < Date() ? Color.cubicAmber : .secondary)
-                            } else { Text("尚未设置截止日期").font(.caption).foregroundStyle(.secondary) }
-                            Text("\(items.count) 项未完成工作").font(.caption).foregroundStyle(.secondary)
-                        }.padding(.vertical, 5).accessibilityIdentifier("calendar.project.\(project.id)")
-                    }
-                }
-            } header: { Text("项目工作") } footer: {
-                Text("展开查看项目工作。同一项共享工作只计算一次投入。")
-            }
             planningLayers
             selectedTrialLayer
             let actual = model.workspace.effectiveWorkSessions.filter { record in
@@ -185,9 +99,8 @@ struct CalendarView: View {
                 }
             }
         }
-        .cubicNavigationTitle("日历")
+        .cubicNavigationTitle(CalendarFormat.dayTitle(day, calendar: cal)).cubicInlineNavigationTitle()
         .refreshable { await model.refresh(background: false); await model.refreshCalendarBridge() }
-        .task { model.ensureCalendarBridge() }
     }
     @ViewBuilder private var planningLayers: some View {
         if model.planning != nil {
@@ -293,5 +206,4 @@ struct CalendarView: View {
     private func boundaryScope(_ boundary: PlanningBoundary) -> String {
         layerName(boundary.layer) + "：" + boundary.projectIDs.map { model.businessIssue($0) }.joined(separator: "、")
     }
-    private func moveDay(_ amount: Int) { day = cal.date(byAdding: .day, value: amount, to: day) ?? day }
 }

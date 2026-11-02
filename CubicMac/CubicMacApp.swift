@@ -4,7 +4,7 @@ import UserNotifications
 
 @main struct CubicMacApp: App {
     @State private var model = AppModel()
-    @State private var navigation = MacNavigation()
+    @State private var navigation = AppNavigation()
 
     init() { UNUserNotificationCenter.current().delegate = CubicNotificationDelegate.shared }
 
@@ -18,19 +18,21 @@ import UserNotifications
         .defaultSize(width: 1180, height: 780)
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button("新建工作") { navigation.editor = .newItem(projectID: nil, nodeID: nil) }
+                Button("记录一件事") { navigation.capture = true }
                     .keyboardShortcut("n").disabled(!canEdit)
+                Button("新建工作…") { navigation.editor = .newItem(projectID: nil, nodeID: nil) }
+                    .keyboardShortcut("n", modifiers: [.command, .option]).disabled(!canEdit)
                 Button("从 Markdown 创建项目…") {
-                    navigation.editor = .markdownProject { _ in navigation.section = .projects }
+                    navigation.editor = .markdownProject { navigation.openProject($0) }
                 }.keyboardShortcut("n", modifiers: [.command, .shift]).disabled(!canEdit)
             }
             CommandGroup(replacing: .appSettings) {
-                Button("设置…") { navigation.startupRoute = nil; navigation.settings = true }.keyboardShortcut(",")
+                Button("设置…") { navigation.openSettings() }.keyboardShortcut(",")
                     .disabled(!canEdit)
             }
             CommandMenu("前往") {
-                ForEach(MacSection.allCases) { section in
-                    Button(section.title) { navigation.section = section }
+                ForEach(AppSection.allCases) { section in
+                    Button(section.title) { navigation.section = section; navigation.selectedProjectID = nil }
                         .keyboardShortcut(section.shortcut).disabled(model.activeModalCount > 0)
                 }
             }
@@ -45,49 +47,18 @@ import UserNotifications
 
     private var canEdit: Bool {
         !model.loading && model.loadFailure == nil && !model.saving && model.activeModalCount == 0 &&
-            navigation.editor == nil && !navigation.settings
+            navigation.editor == nil && !navigation.settings && !navigation.capture
     }
 }
 
-enum MacSection: String, CaseIterable, Identifiable {
-    case inbox, actions, calendar, projects
-    var id: Self { self }
-    var title: String {
-        switch self {
-        case .inbox: "收件箱"
-        case .actions: "行动"
-        case .calendar: "日历"
-        case .projects: "项目"
-        }
-    }
-    var symbol: String {
-        switch self {
-        case .inbox: "tray"
-        case .actions: "circle.hexagongrid"
-        case .calendar: "calendar"
-        case .projects: "square.stack.3d.up"
-        }
-    }
-    var shortcut: KeyEquivalent {
-        switch self {
-        case .inbox: "1"
-        case .actions: "2"
-        case .calendar: "3"
-        case .projects: "4"
-        }
-    }
-}
-
-@MainActor @Observable final class MacNavigation {
-    var section: MacSection? = .actions
-    var settings = false
-    var startupRoute: WorkspaceStartRoute?
-    var editor: ProjectUISheet?
+/// Sidebar rows: the four sections plus each active project under 项目.
+private enum MacSidebarItem: Hashable {
+    case section(AppSection), project(String)
 }
 
 struct MacWorkspaceView: View {
     @Environment(AppModel.self) private var model
-    @Environment(MacNavigation.self) private var navigation
+    @Environment(AppNavigation.self) private var navigation
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -110,7 +81,7 @@ struct MacWorkspaceView: View {
                 } detail: {
                     NavigationStack {
                         detail
-                    }.id(navigation.section)
+                    }.id(sidebarSelection)
                         .formStyle(.grouped)
                         .safeAreaInset(edge: .top, spacing: 0) { serviceBanner }
                 }
@@ -119,6 +90,7 @@ struct MacWorkspaceView: View {
         }
         .sheet(isPresented: $navigation.settings) { SettingsView(initialRoute: navigation.startupRoute) }
         .sheet(item: $navigation.editor) { ProjectUISheetContent(sheet: $0) }
+        .sheet(isPresented: $navigation.capture) { QuickCaptureView() }
         .sheet(isPresented: Binding(get: { model.openingNoticeID != nil }, set: { if !$0 { model.openingNoticeID = nil } })) {
             NavigationStack {
                 if let id = model.openingNoticeID { NoticeDetailView(noticeID: id) }
@@ -165,26 +137,44 @@ struct MacWorkspaceView: View {
         }
     }
 
+    private var sidebarSelection: MacSidebarItem {
+        if navigation.section == .projects, let id = navigation.selectedProjectID { return .project(id) }
+        return .section(navigation.section)
+    }
+
     private var sidebar: some View {
-        @Bindable var navigation = navigation
+        let selection = Binding<MacSidebarItem?>(get: { sidebarSelection }, set: { item in
+            switch item {
+            case .section(let section): navigation.section = section; navigation.selectedProjectID = nil
+            case .project(let id): navigation.openProject(id)
+            case nil: break
+            }
+        })
+        let projects = model.workspace.projects.filter { !$0.archived }
         return VStack(spacing: 0) {
-            List(selection: $navigation.section) {
-                Section("工作空间") {
-                    ForEach(MacSection.allCases) { section in
-                        Label(section.title, systemImage: section.symbol)
-                            .badge(section == .inbox ? model.pendingInboxItems.count : 0)
-                            .tag(section)
-                            .accessibilityIdentifier("mac.sidebar.\(section.rawValue)")
+            List(selection: selection) {
+                ForEach(AppSection.allCases) { section in
+                    Label(section.title, systemImage: section.symbol)
+                        .badge(section == .attention ? model.attention.count : 0)
+                        .tag(MacSidebarItem.section(section))
+                        .accessibilityIdentifier("mac.sidebar.\(section.rawValue)")
+                    if section == .projects {
+                        ForEach(projects, id: \.id) { project in
+                            Label { Text(project.name).lineLimit(1) } icon: { HealthDot(health: model.health(ofProject: project.id)) }
+                                .padding(.leading, 14)
+                                .tag(MacSidebarItem.project(project.id))
+                                .accessibilityIdentifier("mac.sidebar.project.\(project.id)")
+                        }
                     }
                 }
             }.listStyle(.sidebar)
             VStack(alignment: .leading, spacing: 10) {
-                Button { navigation.startupRoute = nil; navigation.settings = true } label: {
+                Button { navigation.openSettings() } label: {
                     Label(model.syncState.label, systemImage: model.syncState.phase == .synced ? "checkmark.icloud" : "icloud")
                         .font(.caption).foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }.buttonStyle(.plain).accessibilityIdentifier("mac.syncStatus")
-                Button { navigation.startupRoute = nil; navigation.settings = true } label: {
+                Button { navigation.openSettings() } label: {
                     Label("设置", systemImage: "slider.horizontal.3").frame(maxWidth: .infinity, alignment: .leading)
                 }.buttonStyle(.plain).accessibilityIdentifier("open-settings")
             }.padding(16)
@@ -194,17 +184,18 @@ struct MacWorkspaceView: View {
     }
 
     @ViewBuilder private var detail: some View {
-        switch navigation.section ?? .actions {
-        case .inbox: InboxView()
-        case .actions: ActionsView()
-        case .calendar: CalendarView()
-        case .projects: ProjectsView()
+        switch sidebarSelection {
+        case .section(.today): TodayView()
+        case .section(.calendar): CalendarHomeView()
+        case .section(.projects): ProjectsView()
+        case .section(.attention): AttentionView()
+        case .project(let id): CubicProjectDetailView(projectID: id)
         }
     }
 
     @ViewBuilder private var serviceBanner: some View {
         if model.activeModalCount == 0, let issue = model.primaryServiceIssue {
-            Button { navigation.startupRoute = nil; navigation.settings = true } label: {
+            Button { navigation.openSettings() } label: {
                 HStack {
                     Label(issue, systemImage: "exclamationmark.circle")
                     Spacer()
