@@ -42,7 +42,7 @@ import Darwin
     }
 
     private func finishFirstInstance(originalDeadline: String) {
-        root(); tap(app.buttons["projects.templates"]); tap(templateRow())
+        root(); tap(app.buttons["projects.menu"]); tap(app.buttons["projects.templates"]); tap(templateRow())
         tap(app.buttons["template.detail.create"])
         XCTAssertTrue(app.datePickers["template.create.deadline.date"].waitForExistence(timeout: 10))
         XCTAssertEqual(app.textFields.count, 0, "Only deadline is editable")
@@ -65,7 +65,7 @@ import Darwin
         record("first-instance-identities", "projects=\(projectIDs)\nstructure=\(instance)")
         tap(app.buttons["projects.project.qa-project"])
         XCTAssertEqual(deadlineDescription(), originalDeadline, "Creating a template instance must not change source deadline")
-        root(); tap(app.buttons["projects.templates"]); tap(templateRow())
+        root(); tap(app.buttons["projects.menu"]); tap(app.buttons["projects.templates"]); tap(templateRow())
         tap(app.buttons["template.detail.operations"]); tap(app.buttons["template.detail.rename"])
         let field = app.alerts.textFields.firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 5))
@@ -80,7 +80,7 @@ import Darwin
         capture("06-renamed-title-original-payload-name")
         app.terminate(); app.launchArguments = ["-CubicWorkCalendarQA"]; app.launch()
         root(); XCTAssertEqual(projectRows().count, 2)
-        tap(app.buttons["projects.templates"]); tap(templateRow())
+        tap(app.buttons["projects.menu"]); tap(app.buttons["projects.templates"]); tap(templateRow())
         XCTAssertEqual(app.staticTexts["template.detail.title"].label, title)
         preview(); capture("07-relaunch-persisted-snapshot")
     }
@@ -91,14 +91,14 @@ import Darwin
         continueAfterFailure = false
         app.launchArguments = ["-CubicWorkCalendarQA"]; app.launch()
         root(); XCTAssertEqual(projectRows().count, 2)
-        tap(app.buttons["projects.templates"]); tap(templateRow())
+        tap(app.buttons["projects.menu"]); tap(app.buttons["projects.templates"]); tap(templateRow())
         waitForRenamedTitle()
         XCTAssertEqual(app.staticTexts["template.preview.project"].label, "QA 工作删除与日历")
         capture("06-renamed-title-original-payload-name")
         preview(); capture("07-relaunch-persisted-snapshot")
         app.terminate(); app.launch()
         root(); XCTAssertEqual(projectRows().count, 2)
-        tap(app.buttons["projects.templates"]); tap(templateRow())
+        tap(app.buttons["projects.menu"]); tap(app.buttons["projects.templates"]); tap(templateRow())
         waitForRenamedTitle(); preview(); capture("07b-second-relaunch-persisted-snapshot")
     }
 
@@ -115,7 +115,7 @@ import Darwin
         let firstProject = projectRows().allElementsBoundByIndex.first { $0.identifier != "projects.project.qa-project" }!
         let firstProjectID = firstProject.identifier
         tap(firstProject); let first = structure()
-        root(); tap(app.buttons["projects.templates"]); tap(templateRow())
+        root(); tap(app.buttons["projects.menu"]); tap(app.buttons["projects.templates"]); tap(templateRow())
         XCTAssertEqual(app.staticTexts["template.detail.title"].label, title)
         tap(app.buttons["template.detail.create"]); tap(app.buttons["template.create.save"])
         XCTAssertTrue(app.navigationBars["项目详情"].waitForExistence(timeout: 15))
@@ -127,7 +127,7 @@ import Darwin
         XCTAssertTrue(ids.contains(firstProjectID) && ids.contains("projects.project.qa-project"))
         record("two-instance-identities", "projects=\(ids.sorted())\nfirst=\(first.sorted())\nsecond=\(second.sorted())")
         capture("09-two-project-instances")
-        tap(app.buttons["projects.templates"]); tap(templateRow())
+        tap(app.buttons["projects.menu"]); tap(app.buttons["projects.templates"]); tap(templateRow())
         tap(app.buttons["template.detail.operations"]); tap(app.buttons["template.detail.delete"])
         capture("10-delete-confirmation")
         confirmDelete()
@@ -137,7 +137,7 @@ import Darwin
         capture("12-both-created-projects-retained")
         app.terminate(); app.launchArguments = ["-CubicWorkCalendarQA"]; app.launch()
         root(); XCTAssertEqual(collectProjectIDs(), ids)
-        tap(app.buttons["projects.templates"])
+        tap(app.buttons["projects.menu"]); tap(app.buttons["projects.templates"])
         XCTAssertTrue(app.staticTexts["还没有项目模板"].waitForExistence(timeout: 10))
         capture("13-deletion-and-projects-persisted")
     }
@@ -152,7 +152,7 @@ import Darwin
         XCTAssertTrue(ids.contains("projects.project.qa-project"))
         record("three-project-identities-before-delete", ids.sorted().joined(separator: "\n"))
         capture("09-two-project-instances")
-        tap(app.buttons["projects.templates"]); capture("09a-renamed-template-list")
+        tap(app.buttons["projects.menu"]); tap(app.buttons["projects.templates"]); capture("09a-renamed-template-list")
         tap(templateRow()); waitForRenamedTitle()
         tap(app.buttons["template.detail.operations"]); tap(app.buttons["template.detail.delete"])
         capture("10-delete-confirmation")
@@ -164,7 +164,7 @@ import Darwin
         app.terminate(); app.launch()
         root(); XCTAssertEqual(collectProjectIDs(), ids)
         record("three-project-identities-after-relaunch", ids.sorted().joined(separator: "\n"))
-        tap(app.buttons["projects.templates"])
+        tap(app.buttons["projects.menu"]); tap(app.buttons["projects.templates"])
         XCTAssertTrue(app.staticTexts["还没有项目模板"].waitForExistence(timeout: 10))
         capture("13-deletion-and-projects-persisted")
     }

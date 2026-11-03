@@ -38,13 +38,13 @@ import XCTest
         // Cancel does not save a template.
         tap(app.buttons["template.editor.cancel"])
         projectTab()
-        tap(app.buttons["projects.templates"])
+        tap(app.buttons["projects.menu"]); tap(app.buttons["projects.templates"])
         XCTAssertTrue(app.otherElements["templates.empty"].exists || app.staticTexts["还没有项目模板"].exists)
         back("项目模板")
         tap(app.buttons["projects.project.qa-project"])
         tap(app.buttons["project.operations"]); tap(app.buttons["project.saveTemplate"])
         tap(app.buttons["template.editor.save"])
-        projectTab(); tap(app.buttons["projects.templates"])
+        projectTab(); tap(app.buttons["projects.menu"]); tap(app.buttons["projects.templates"])
         let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "templates.template.")).firstMatch
         tap(row)
         capture("03-template-detail")
@@ -58,7 +58,7 @@ import XCTest
         tap(app.buttons["template.create.cancel"])
         projectTab()
         XCTAssertEqual(projectRows().count, 1, "Cancelled create draft must not append a project")
-        tap(app.buttons["projects.templates"]); tap(row)
+        tap(app.buttons["projects.menu"]); tap(app.buttons["projects.templates"]); tap(row)
         tap(app.buttons["template.detail.create"])
         XCTAssertTrue(app.datePickers["template.create.deadline.date"].waitForExistence(timeout: 10))
         XCTAssertEqual(app.textFields.count, 0, "Content/name/duration must be read-only; deadline is the only input")
@@ -90,7 +90,7 @@ import XCTest
         // Rename only changes lookup title; relaunch retains snapshot.
         projectTab()
         let firstProjectID = (0..<projectRows().count).map { projectRows().element(boundBy: $0).identifier }.first { $0 != "projects.project.qa-project" }!
-        tap(app.buttons["projects.templates"]); tap(row)
+        tap(app.buttons["projects.menu"]); tap(app.buttons["projects.templates"]); tap(row)
         tap(app.buttons["template.detail.operations"]); tap(app.buttons["template.detail.rename"])
         let name = app.alerts.textFields.firstMatch
         XCTAssertTrue(name.waitForExistence(timeout: 5))
@@ -101,7 +101,7 @@ import XCTest
         capture("08-renamed-template")
         app.terminate(); app.launchArguments = ["-CubicWorkCalendarQA"]; app.launch()
         projectTab(); XCTAssertEqual(projectRows().count, 2)
-        tap(app.buttons["projects.templates"]); tap(row)
+        tap(app.buttons["projects.menu"]); tap(app.buttons["projects.templates"]); tap(row)
         XCTAssertEqual(app.staticTexts["template.detail.title"].label, "QA 模板重命名")
         assertPreview(); capture("09-persisted-snapshot")
         tap(app.buttons["template.detail.create"]); tap(app.buttons["template.create.save"])
@@ -113,7 +113,7 @@ import XCTest
         replaceText(secondDuration, "90")
         commitKeyboard()
         projectTab(); XCTAssertEqual(projectRows().count, 3)
-        tap(app.buttons["projects.templates"]); tap(row)
+        tap(app.buttons["projects.menu"]); tap(app.buttons["projects.templates"]); tap(row)
         assertPreview()
         tap(app.buttons["template.detail.operations"]); tap(app.buttons["template.detail.delete"])
         capture("10-delete-confirmation")
@@ -132,7 +132,7 @@ import XCTest
         try requirePhysicalQA(#function)
         continueAfterFailure = false
         app.launchArguments = ["-CubicWorkCalendarQA", "-CubicWorkCalendarQAReset"]; app.launch()
-        projectTab(); tap(app.buttons["projects.waiting"]); tap(app.buttons["waiting.new"])
+        projectTab(); tap(app.buttons["待处理"]); tap(app.buttons["inbox.waiting"]); tap(app.buttons["waiting.new"])
         fill(app.textFields["editor.blocker.name"], "QA 审批等待")
         fill(app.textFields["editor.blocker.condition"], "收到签字")
         fill(app.textFields["editor.blocker.duration"], "60")
@@ -177,7 +177,7 @@ import XCTest
         tap(app.buttons["project.operations"]); tap(app.buttons["编辑项目属性"])
         XCTAssertEqual(app.switches["editor.project.deadline.enabled"].value as? String, "0")
         tap(app.buttons["editor.project.cancel"])
-        projectTab(); tap(app.buttons["projects.templates"])
+        projectTab(); tap(app.buttons["projects.menu"]); tap(app.buttons["projects.templates"])
         tap(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "templates.template.")).firstMatch)
         reveal(candidates); capture("A03-saved-candidate-preview")
         tap(app.buttons["template.detail.create"])
@@ -208,7 +208,7 @@ import XCTest
         try requirePhysicalQA(#function)
         continueAfterFailure = false
         app.launchArguments = ["-CubicWorkCalendarQA", "-CubicWorkCalendarQAReset"]; app.launch()
-        projectTab(); tap(app.buttons["projects.create"])
+        projectTab(); tap(app.buttons["projects.menu"]); tap(app.buttons["projects.create"])
         fill(app.textFields["editor.project.name"], "QA 外部项目")
         tap(app.buttons["editor.project.save"])
         XCTAssertTrue(app.navigationBars["项目详情"].waitForExistence(timeout: 15))
@@ -238,7 +238,7 @@ import XCTest
         XCTAssertFalse(app.buttons["template.editor.save"].isEnabled)
         capture("E01-external-relationship-blocked")
         tap(app.buttons["template.editor.cancel"])
-        projectTab(); tap(app.buttons["projects.templates"])
+        projectTab(); tap(app.buttons["projects.menu"]); tap(app.buttons["projects.templates"])
         XCTAssertTrue(app.staticTexts["还没有项目模板"].exists)
     }
     private func replaceText(_ field: XCUIElement, _ text: String) {

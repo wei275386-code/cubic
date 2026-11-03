@@ -47,7 +47,7 @@ import XCTest
         }
         XCTAssertTrue(includeArchived.isHittable)
         includeArchived.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
-        app.buttons["行动"].tap()
+        app.buttons["今天"].tap()
         func assertArchivedNamesAbsent() {
             guard !baseline else { return }
             for name in ["项目1", "项目 1", "家庭财务复盘", "家庭账户复盘"] {
@@ -77,8 +77,8 @@ import XCTest
             app.navigationBars["排期与待确认事项"].buttons.element(boundBy: 0).tap()
         }
         app.terminate(); app.launch()
-        XCTAssertTrue(app.buttons["行动"].waitForExistence(timeout: 25))
-        app.buttons["行动"].tap()
+        XCTAssertTrue(app.buttons["今天"].waitForExistence(timeout: 25))
+        app.buttons["今天"].tap()
         for page in 0...2 {
             capture("ordinary-archive-restarted-\(page)", app: app)
             assertArchivedNamesAbsent()
@@ -93,8 +93,8 @@ import XCTest
         let app = XCUIApplication()
         app.launchArguments = []
         app.launch()
-        XCTAssertTrue(app.buttons["行动"].waitForExistence(timeout: 25))
-        app.buttons["行动"].tap()
+        XCTAssertTrue(app.buttons["今天"].waitForExistence(timeout: 25))
+        app.buttons["今天"].tap()
         for title in ["1.2.1", "工作1.1.1", "工作1.1.2"] {
             XCTAssertTrue(app.staticTexts[title].firstMatch.waitForExistence(timeout: 10))
         }
@@ -118,8 +118,8 @@ import XCTest
                 "Valid Calendar capacity uncertainty must remain visible")
         }
         app.terminate(); app.launch()
-        XCTAssertTrue(app.buttons["行动"].waitForExistence(timeout: 25))
-        app.buttons["行动"].tap()
+        XCTAssertTrue(app.buttons["今天"].waitForExistence(timeout: 25))
+        app.buttons["今天"].tap()
         for _ in 0..<2 { app.swipeUp() }
         assertOldRemindersAbsent(app)
         XCTAssertTrue(app.staticTexts["推算中尚未实现的条件"].firstMatch.exists)
@@ -142,6 +142,6 @@ import XCTest
         XCTAssertTrue(archived.isHittable)
         archived.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
         XCTAssertEqual(archived.value as? String, "0")
-        app.buttons["行动"].tap()
+        app.buttons["今天"].tap()
     }
 }

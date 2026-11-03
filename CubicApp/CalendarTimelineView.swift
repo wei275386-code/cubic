@@ -17,48 +17,29 @@ private struct CalendarDropPreview: Equatable {
     let block: WorkTimeBlock
 }
 
-struct CalendarTimelineView: View {
-    let day: Date
-    let calendar: Calendar
-    let slots: [CapacitySlot]
-    let events: [BusyEvent]
-    let itemIDs: Set<String>
-    let allocations: [TrialAllocation]
-    @Environment(AppModel.self) private var model
-    @State private var editing: WorkTimeBlock?
-    @State private var placing = false
-    @State private var preview: CalendarDropPreview?
-    #if os(iOS)
-    @State private var selectionFeedback = UISelectionFeedbackGenerator()
-    #endif
-    private var dayStart: Date { calendar.startOfDay(for: day) }
-    private var dayEnd: Date { calendar.date(byAdding: .day, value: 1, to: dayStart)! }
-    private var blocks: [WorkTimeBlock] {
-        (model.workspace.timeBlocks ?? []).filter { block in
-            guard let item = model.item(block.itemID) else { return false }
-            return itemIDs.contains(block.itemID) && !item.archived && item.effectiveDisposition != .cancelled && block.start < dayEnd && block.end > dayStart
-        }
-    }
-    private var rangeStart: Date {
-        let earliest = (slots.map(\.start) + blocks.map(\.start)).min() ?? calendar.date(bySettingHour: 8, minute: 0, second: 0, of: day)!
-        return max(dayStart, (calendar.dateInterval(of: .hour, for: earliest)?.start ?? earliest).addingTimeInterval(-3600))
-    }
-    private var rangeEnd: Date {
-        let latest = (slots.map(\.end) + blocks.map(\.end)).max() ?? calendar.date(bySettingHour: 20, minute: 0, second: 0, of: day)!
-        let endOfHour = calendar.dateInterval(of: .hour, for: latest)?.end ?? latest
-        return min(dayEnd, max(endOfHour, rangeStart.addingTimeInterval(6 * 3600)))
-    }
-    private var candidates: [WorkItem] {
-        // A placed work leaves the rail, including partial arrangements. Removing
-        // its last current/future block makes it available again.
+/// A point-in-time reminder drawn on the timeline, such as a waiting follow-up.
+struct CalendarMarker: Identifiable, Equatable {
+    let id: String
+    let date: Date
+    let title: String
+}
+
+extension AppModel {
+    /// A placed work leaves the rail, including partial arrangements. Removing
+    /// its last current/future block makes it available again.
+    func calendarCandidates(itemIDs: Set<String>) -> [WorkItem] {
         let now = Date()
-        let scheduled = Set((model.workspace.timeBlocks ?? []).filter { $0.end > now }.map(\.itemID))
-        return model.workspace.items.filter {
+        let scheduled = Set((workspace.timeBlocks ?? []).filter { $0.end > now }.map(\.itemID))
+        return workspace.items.filter {
             itemIDs.contains($0.id) && !$0.archived && $0.effectiveDisposition == .active &&
             $0.status != .completed && !scheduled.contains($0.id) && ($0.remainingMinutes ?? 0) > 0
+        }.sorted { lhs, rhs in
+            let first = health(ofItem: lhs).urgency, second = health(ofItem: rhs).urgency
+            return first == second ? lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending : first < second
         }
     }
-    private var candidateDurations: [String: Int] {
+
+    func calendarCandidateDurations(_ candidates: [WorkItem], allocations: [TrialAllocation]) -> [String: Int] {
         var suggested: [String: Int] = [:]
         for allocation in allocations where suggested[allocation.itemID] == nil {
             suggested[allocation.itemID] = Int(allocation.end.timeIntervalSince(allocation.start) / 60)
@@ -68,44 +49,134 @@ struct CalendarTimelineView: View {
             return (item.id, item.requiresContinuous ? remaining : max(1, min(max(15, suggested[item.id] ?? 30), remaining)))
         })
     }
+}
+
+/// Unscheduled work as draggable cards. Horizontal above the iPhone timeline,
+/// vertical beside the Mac week grid.
+struct CalendarCandidateRail: View {
+    let itemIDs: Set<String>
+    let allocations: [TrialAllocation]
+    let calendar: Calendar
+    let defaultStart: Date
+    var axis: Axis = .horizontal
+    @Environment(AppModel.self) private var model
+    @State private var editing: WorkTimeBlock?
     var body: some View {
-        let durations = candidateDurations
-        VStack(alignment: .leading, spacing: 12) {
-            Text(dragInstructions)
-                .font(.caption).foregroundStyle(.secondary)
-            if !candidates.isEmpty {
+        let candidates = model.calendarCandidates(itemIDs: itemIDs)
+        let durations = model.calendarCandidateDurations(candidates, allocations: allocations)
+        Group {
+            if axis == .horizontal {
                 ScrollView(.horizontal) {
                     HStack(spacing: 8) {
-                        ForEach(candidates, id: \.id) { item in
-                            NativeCalendarDragCard(drag: CalendarDrag(itemID: item.id, blockID: nil, minutes: durations[item.id] ?? 30), onTap: {
-                                let start = max(slots.first?.start ?? rangeStart, Date().addingTimeInterval(300))
-                                editing = WorkTimeBlock(itemID: item.id, start: start, end: start.addingTimeInterval(Double(durations[item.id] ?? 30) * 60))
-                            }) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(item.name).font(.subheadline.weight(.semibold)).lineLimit(2)
-                                    Text("\(durations[item.id] ?? 30) 分钟").font(.caption2).foregroundStyle(.secondary)
-                                }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading).padding(10)
-                                    .background(Color.cubicAccent.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
-                            }.frame(width: 168, height: 68)
-                                .accessibilityElement(children: .combine).accessibilityLabel("\(item.name)，\(durations[item.id] ?? 30) 分钟")
-                                .accessibilityAddTraits(.isButton).accessibilityIdentifier("calendar.drag.item.\(item.id)")
-                        }
-                    }
+                        ForEach(candidates, id: \.id) { card($0, minutes: durations[$0.id] ?? 30).frame(width: 172) }
+                    }.padding(.vertical, 2)
                 }.scrollIndicators(.hidden)
             } else {
-                Text(blocks.isEmpty ? "没有待安排工作" : placedInstructions)
-                    .font(.caption).foregroundStyle(.secondary)
+                VStack(spacing: 8) {
+                    ForEach(candidates, id: \.id) { card($0, minutes: durations[$0.id] ?? 30).frame(maxWidth: .infinity) }
+                }
+            }
+        }.sheet(item: $editing) { CalendarTimeBlockEditor(block: $0, calendar: calendar) }
+    }
+    private func card(_ item: WorkItem, minutes: Int) -> some View {
+        // The card is hosted outside SwiftUI's environment, so it receives plain values.
+        let health = model.health(ofItem: item)
+        let context = model.workspace.projects.first { model.relatedProjectIDs(for: item).contains($0.id) }?.name ?? "独立工作"
+        return NativeCalendarDragCard(drag: CalendarDrag(itemID: item.id, blockID: nil, minutes: minutes), onTap: {
+            let start = max(defaultStart, Date().addingTimeInterval(300))
+            editing = WorkTimeBlock(itemID: item.id, start: start, end: start.addingTimeInterval(Double(minutes) * 60))
+        }) {
+            CandidateCardContent(name: item.name, context: context, minutes: minutes, tint: health.tint)
+        }.frame(height: 62)
+            .accessibilityElement(children: .combine).accessibilityLabel("\(item.name)，\(minutes) 分钟，\(context)")
+            .accessibilityAddTraits(.isButton).accessibilityIdentifier("calendar.drag.item.\(item.id)")
+    }
+}
+
+private struct CandidateCardContent: View {
+    let name: String
+    let context: String
+    let minutes: Int
+    let tint: Color
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Circle().fill(tint).frame(width: 7, height: 7)
+                Text(name).font(.subheadline.weight(.semibold)).lineLimit(1)
+            }
+            HStack(spacing: 6) {
+                Text(context).lineLimit(1)
+                Spacer(minLength: 4)
+                Text(shortMinutesLabel(minutes)).monospacedDigit()
+            }.font(.caption).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+        .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+struct CalendarTimelineView: View {
+    let day: Date
+    let calendar: Calendar
+    let slots: [CapacitySlot]
+    let events: [BusyEvent]
+    let itemIDs: Set<String>
+    let allocations: [TrialAllocation]
+    var markers: [CalendarMarker] = []
+    var showsRail = true
+    var showsHourLabels = true
+    var hourRange: ClosedRange<Int>? = nil
+    var hourHeight: Double = 60
+    @Environment(AppModel.self) private var model
+    @State private var editing: WorkTimeBlock?
+    @State private var placing = false
+    @State private var preview: CalendarDropPreview?
+    #if os(iOS)
+    @State private var selectionFeedback = UISelectionFeedbackGenerator()
+    #endif
+    private var gutter: Double { showsHourLabels ? 52 : 4 }
+    private var dayStart: Date { calendar.startOfDay(for: day) }
+    private var dayEnd: Date { calendar.date(byAdding: .day, value: 1, to: dayStart)! }
+    private var blocks: [WorkTimeBlock] {
+        (model.workspace.timeBlocks ?? []).filter { block in
+            guard let item = model.item(block.itemID) else { return false }
+            return itemIDs.contains(block.itemID) && !item.archived && item.effectiveDisposition != .cancelled && block.start < dayEnd && block.end > dayStart
+        }
+    }
+    private var rangeStart: Date {
+        if let hourRange { return min(dayEnd, calendar.date(byAdding: .hour, value: hourRange.lowerBound, to: dayStart) ?? dayStart) }
+        let earliest = (slots.map(\.start) + blocks.map(\.start)).min() ?? calendar.date(bySettingHour: 8, minute: 0, second: 0, of: day)!
+        return max(dayStart, (calendar.dateInterval(of: .hour, for: earliest)?.start ?? earliest).addingTimeInterval(-3600))
+    }
+    private var rangeEnd: Date {
+        if let hourRange { return min(dayEnd, calendar.date(byAdding: .hour, value: hourRange.upperBound, to: dayStart) ?? dayEnd) }
+        let latest = (slots.map(\.end) + blocks.map(\.end)).max() ?? calendar.date(bySettingHour: 20, minute: 0, second: 0, of: day)!
+        let endOfHour = calendar.dateInterval(of: .hour, for: latest)?.end ?? latest
+        return min(dayEnd, max(endOfHour, rangeStart.addingTimeInterval(6 * 3600)))
+    }
+    private var hasCandidates: Bool { !model.calendarCandidates(itemIDs: itemIDs).isEmpty }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if showsRail {
+                if hasCandidates {
+                    Text(dragInstructions).font(.caption).foregroundStyle(.secondary)
+                    CalendarCandidateRail(itemIDs: itemIDs, allocations: allocations, calendar: calendar, defaultStart: slots.first?.start ?? rangeStart)
+                } else {
+                    Text(blocks.isEmpty ? "没有待安排工作" : placedInstructions)
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
             GeometryReader { geometry in
-                let start = rangeStart, end = rangeEnd, seconds = end.timeIntervalSince(start)
-                let height = geometry.size.height, width = max(1, geometry.size.width - 52)
+                let start = rangeStart, end = rangeEnd, seconds = max(1, end.timeIntervalSince(start))
+                let height = geometry.size.height, width = max(1, geometry.size.width - gutter)
                 ZStack(alignment: .topLeading) {
-                    Rectangle().fill(Color.secondary.opacity(0.04)).allowsHitTesting(false)
+                    Rectangle().fill(Color.secondary.opacity(0.03)).allowsHitTesting(false)
                     ForEach(Array(slots.enumerated()), id: \.offset) { _, slot in
-                        interval(start: slot.start, end: slot.end, rangeStart: start, seconds: seconds, height: height, width: width, color: Color.cubicAccent.opacity(0.1)).allowsHitTesting(false)
+                        interval(start: slot.start, end: slot.end, rangeStart: start, seconds: seconds, height: height, width: width, color: Color.cubicAccent.opacity(0.08)).allowsHitTesting(false)
                     }
                     ForEach(events) { event in
-                        interval(start: event.start, end: event.end, rangeStart: start, seconds: seconds, height: height, width: width, color: Color.cubicAmber.opacity(0.18)).allowsHitTesting(false)
+                        eventView(event, rangeStart: start, seconds: seconds, height: height, width: width).allowsHitTesting(false)
                     }
                     NativeCalendarDropSurface(timelineHeight: height, onHover: { drag, point in
                         updatePreview(drag, point: point, start: start, end: end, height: height)
@@ -116,44 +187,61 @@ struct CalendarTimelineView: View {
                         let y = Double(hour) * 3600 / seconds * height
                         let date = start.addingTimeInterval(Double(hour) * 3600)
                         // The label's centre, rule and event top share the same y.
-                        Text(time(date)).font(.caption2).monospacedDigit()
-                            .frame(width: 46, height: 16, alignment: .leading)
-                            .position(x: 23, y: y)
-                            .accessibilityIdentifier("calendar.hour.\(hour)")
-                            .allowsHitTesting(false)
-                        Rectangle().fill(Color.secondary.opacity(0.2)).frame(width: width, height: 0.5)
-                            .offset(x: 52, y: y).allowsHitTesting(false)
+                        if showsHourLabels {
+                            Text(time(date)).font(.caption2).monospacedDigit().foregroundStyle(.secondary)
+                                .frame(width: 46, height: 16, alignment: .leading)
+                                .position(x: 23, y: y)
+                                .accessibilityIdentifier("calendar.hour.\(hour)")
+                                .allowsHitTesting(false)
+                        }
+                        Rectangle().fill(Color.secondary.opacity(0.18)).frame(width: width, height: 0.5)
+                            .offset(x: gutter, y: y).allowsHitTesting(false)
                     }
                     ForEach(blocks) { block in
                         let lower = max(block.start, start), upper = min(block.end, end)
                         if lower < upper {
                             let origin = lower.timeIntervalSince(start) / seconds * height
                             NativeCalendarDragCard(drag: CalendarDrag(itemID: block.itemID, blockID: block.id, minutes: max(1, Int(block.end.timeIntervalSince(block.start) / 60)), anchorMinutes: lower.timeIntervalSince(block.start) / 60), anchorScale: seconds / 60 / height, timelineOffset: origin, timelineHeight: height, onTap: { editing = block }, onHover: { drag, point in
-                                updatePreview(drag, point: CGPoint(x: point.x + 52, y: origin + point.y), start: start, end: end, height: height)
+                                updatePreview(drag, point: CGPoint(x: point.x + gutter, y: origin + point.y), start: start, end: end, height: height)
                             }, onDrop: { drag, point in
-                                place(drag, point: CGPoint(x: point.x + 52, y: origin + point.y), start: start, end: end, height: height)
+                                place(drag, point: CGPoint(x: point.x + gutter, y: origin + point.y), start: start, end: end, height: height)
                             }) {
                                 blockContent(block, visibleMinutes: upper.timeIntervalSince(lower) / 60)
-                            }.frame(width: width, height: max(1, upper.timeIntervalSince(lower) / seconds * height - 1))
+                            }.frame(width: max(1, width - 4), height: max(1, upper.timeIntervalSince(lower) / seconds * height - 1))
                                 .accessibilityElement(children: .combine)
                                 .accessibilityLabel("\(model.item(block.itemID)?.name ?? "工作")，\(time(block.start))–\(time(block.end))，\(CalendarIntegrationCopy.blockStatus(block, model: model))")
                                 .accessibilityAddTraits(.isButton).accessibilityIdentifier("calendar.block.\(block.id)")
-                                .offset(x: 52, y: origin)
+                                .offset(x: gutter + 2, y: origin)
                         }
+                    }
+                    ForEach(markers) { marker in
+                        if marker.date >= start && marker.date <= end {
+                            markerView(marker, width: width)
+                                .offset(x: gutter + 4, y: max(0, marker.date.timeIntervalSince(start) / seconds * height - 10))
+                                .allowsHitTesting(false)
+                        }
+                    }
+                    let now = Date()
+                    if now >= start && now <= end {
+                        let y = now.timeIntervalSince(start) / seconds * height
+                        Rectangle().fill(Color.red).frame(width: width, height: 1.5)
+                            .offset(x: gutter, y: y - 0.75).allowsHitTesting(false)
+                        Circle().fill(Color.red).frame(width: 8, height: 8)
+                            .offset(x: gutter - 4, y: y - 4).allowsHitTesting(false).accessibilityHidden(true)
                     }
                     if let preview {
                         let block = preview.block
                         let lower = max(block.start, start), upper = min(block.end, end)
                         if lower < upper {
                             blockContent(block, visibleMinutes: upper.timeIntervalSince(lower) / 60)
-                                .overlay { RoundedRectangle(cornerRadius: 5).stroke(Color.cubicAccent, lineWidth: 2) }
-                                .frame(width: width, height: max(1, upper.timeIntervalSince(lower) / seconds * height - 1))
-                                .offset(x: 52, y: lower.timeIntervalSince(start) / seconds * height)
+                                .overlay { RoundedRectangle(cornerRadius: CubicMetrics.blockRadius).stroke(Color.cubicAccent, lineWidth: 2) }
+                                .frame(width: max(1, width - 4), height: max(1, upper.timeIntervalSince(lower) / seconds * height - 1))
+                                .offset(x: gutter + 2, y: lower.timeIntervalSince(start) / seconds * height)
                                 .allowsHitTesting(false).accessibilityHidden(true)
                         }
                     }
                 }.accessibilityElement(children: .contain).accessibilityIdentifier("calendar.timeline")
-            }.frame(height: max(360, rangeEnd.timeIntervalSince(rangeStart) / 3600 * 60))
+            }.frame(height: max(showsRail ? 360 : 120, rangeEnd.timeIntervalSince(rangeStart) / 3600 * hourHeight))
                 .padding(.vertical, 8)
             if placing { Label("正在保存时间块…", systemImage: "clock").font(.caption) }
         }.sheet(item: $editing) { CalendarTimeBlockEditor(block: $0, calendar: calendar) }
@@ -162,7 +250,7 @@ struct CalendarTimelineView: View {
     private func proposedBlock(_ drag: CalendarDrag, point: CGPoint, start: Date, end: Date, height: Double) -> WorkTimeBlock? {
         guard !placing, !model.saving, itemIDs.contains(drag.itemID), model.item(drag.itemID) != nil,
               (1...5256000).contains(drag.minutes), drag.anchorMinutes.isFinite,
-              point.x >= 52, point.y >= 0, point.y <= height else { return nil }
+              point.x >= gutter, point.y >= 0, point.y <= height else { return nil }
         let minutes = ((point.y / height * end.timeIntervalSince(start) / 60 - drag.anchorMinutes) / 15).rounded() * 15
         let date = start.addingTimeInterval(minutes * 60)
         return WorkTimeBlock(id: drag.blockID ?? "calendar.drop.preview", itemID: drag.itemID, start: date, end: date.addingTimeInterval(Double(drag.minutes) * 60))
@@ -192,26 +280,67 @@ struct CalendarTimelineView: View {
         }
     }
     private func blockContent(_ block: WorkTimeBlock, visibleMinutes: Double) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
+        let past = block.end <= Date()
+        let name = model.item(block.itemID)?.name ?? "工作"
+        let range = "\(time(block.start))–\(time(block.end))"
+        return VStack(alignment: .leading, spacing: 1) {
             HStack(spacing: 4) {
-                Text(model.item(block.itemID)?.name ?? "工作")
-                    .font(visibleMinutes < 30 ? .system(size: 10, weight: .semibold) : .caption.weight(.semibold))
-                    .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                if past { Image(systemName: "checkmark").font(.system(size: 9, weight: .bold)) }
                 if visibleMinutes < 30 {
-                    Text("\(time(block.start))–\(time(block.end))").font(.system(size: 9)).monospacedDigit().lineLimit(1)
+                    // One line in a narrow column: keep the whole time beside the name, otherwise drop it rather than cut both.
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 4) {
+                            Text(name).font(.system(size: 10, weight: .semibold)).lineLimit(1).fixedSize()
+                            Spacer(minLength: 0)
+                            Text(range).font(.system(size: 9)).monospacedDigit().lineLimit(1).fixedSize()
+                        }
+                        Text(name).font(.system(size: 10, weight: .semibold)).lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                } else {
+                    Text(name).font(.caption.weight(.semibold))
+                        .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
             if visibleMinutes >= 30 {
-                Text("\(time(block.start))–\(time(block.end))").font(.system(size: 10)).monospacedDigit().lineLimit(1)
+                Text(range).font(.system(size: 10)).monospacedDigit().lineLimit(1)
             }
             if visibleMinutes >= 60 {
                 Text(CalendarIntegrationCopy.blockStatus(block, model: model)).font(.caption2).lineLimit(1)
             }
-        }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .padding(.horizontal, 6).padding(.top, 1)
-            .background(Color.cubicAccent.opacity(0.23), in: RoundedRectangle(cornerRadius: 5))
-            .overlay(alignment: .leading) { Rectangle().fill(Color.cubicAccent).frame(width: 3) }
+        }.foregroundStyle(past ? Color.secondary : Color.primary)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .padding(.leading, 8).padding(.trailing, 4).padding(.top, 2)
+            .background(Color.cubicAccent.opacity(past ? 0.1 : 0.2), in: RoundedRectangle(cornerRadius: CubicMetrics.blockRadius))
+            .overlay(alignment: .leading) { Capsule().fill(Color.cubicAccent.opacity(past ? 0.5 : 1)).frame(width: 3).padding(.vertical, 3).padding(.leading, 2) }
+            .clipShape(RoundedRectangle(cornerRadius: CubicMetrics.blockRadius))
+            .help("\(name) \(range)")
+    }
+    private func eventView(_ event: BusyEvent, rangeStart: Date, seconds: Double, height: Double, width: Double) -> some View {
+        let lower = max(event.start, rangeStart), upper = min(event.end, rangeStart.addingTimeInterval(seconds))
+        let eventHeight = max(0, upper.timeIntervalSince(lower) / seconds * height - 1)
+        return Text(event.allDay ? "\(event.title) · 全天" : event.title)
+            .font(.caption2.weight(.medium)).foregroundStyle(.secondary).lineLimit(1)
+            .padding(.horizontal, 6).padding(.top, 2)
+            .frame(width: max(1, width - 4), height: eventHeight, alignment: .topLeading)
+            .background(Color.secondary.opacity(0.14), in: RoundedRectangle(cornerRadius: CubicMetrics.blockRadius))
+            .overlay { RoundedRectangle(cornerRadius: CubicMetrics.blockRadius).strokeBorder(Color.secondary.opacity(0.25), style: StrokeStyle(lineWidth: 0.5, dash: [3, 2])) }
             .clipped()
+            .opacity(eventHeight > 0 ? 1 : 0)
+            .offset(x: gutter + 2, y: max(0, lower.timeIntervalSince(rangeStart) / seconds * height))
+            .accessibilityLabel("日历占用：\(event.title)")
+    }
+    private func markerView(_ marker: CalendarMarker, width: Double) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: "flag.fill").font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
+                .frame(width: 20, height: 20).background(Color.cubicAmber, in: Circle())
+            if width > 150 {
+                Text(marker.title).font(.caption2.weight(.semibold)).foregroundStyle(Color.cubicAmber).lineLimit(1)
+                    .padding(.horizontal, 7).padding(.vertical, 3)
+                    .background(Color.cubicAmber.opacity(0.14), in: Capsule())
+            }
+        }.frame(maxWidth: max(20, width - 8), alignment: .leading)
+            .accessibilityLabel("跟进：\(marker.title)")
     }
     private func time(_ date: Date) -> String {
         date.formatted(Date.FormatStyle(date: .omitted, time: .shortened, calendar: calendar, timeZone: calendar.timeZone))
@@ -233,9 +362,10 @@ struct CalendarTimelineView: View {
     private func interval(start: Date, end: Date, rangeStart: Date, seconds: Double, height: Double, width: Double, color: Color) -> some View {
         let lower = max(start, rangeStart), upper = min(end, rangeStart.addingTimeInterval(seconds))
         return Rectangle().fill(color).frame(width: width, height: max(0, upper.timeIntervalSince(lower) / seconds * height))
-            .offset(x: 52, y: max(0, lower.timeIntervalSince(rangeStart) / seconds * height))
+            .offset(x: gutter, y: max(0, lower.timeIntervalSince(rangeStart) / seconds * height))
     }
 }
+
 
 /// Both the rail and placed events use the system's lift, cancellation and
 /// drag session. Local typed payloads prevent text from becoming calendar work.

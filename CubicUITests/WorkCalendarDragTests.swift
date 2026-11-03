@@ -54,8 +54,8 @@ import XCTest
         let app = XCUIApplication()
         app.launchArguments = ["-CubicWorkCalendarQA", "-CubicWorkCalendarQAReset"]
         app.launch()
-        XCTAssertTrue(app.buttons["行动"].waitForExistence(timeout: 20))
-        app.buttons["行动"].tap()
+        XCTAssertTrue(app.buttons["今天"].waitForExistence(timeout: 20))
+        app.buttons["今天"].tap()
         XCTAssertFalse(app.staticTexts["现在可以做什么？"].exists)
         XCTAssertFalse(app.staticTexts["可开始"].exists)
         capture("qa-actions-top-layout")
@@ -126,7 +126,7 @@ import XCTest
         let before = try XCTUnwrap(initialHours[lowerTick.index]).midY
         print("QA-FIXED-EDGE index=\(lowerTick.index) before=\(before) after=\(lowerTick.midY) displacement=\(before - lowerTick.midY)")
         XCTAssertGreaterThan(before - lowerTick.midY, 20)
-        let project = app.descendants(matching: .any)["calendar.project.qa-project"].firstMatch
+        let project = app.buttons["calendar.dayDetails"].firstMatch
         XCTAssertFalse(project.exists && project.isHittable, "Edge hold must not scroll into project details")
         XCTAssertEqual(app.buttons[id].label, originalLabel, "Out-of-capacity edge hold must preserve the valid original")
 
@@ -207,18 +207,17 @@ import XCTest
         let app = XCUIApplication()
         app.launchArguments = ["-CubicWorkCalendarQA", "-CubicWorkCalendarQAReset"]
         app.launch()
-        XCTAssertTrue(app.buttons["日历"].waitForExistence(timeout: 20))
-        app.buttons["日历"].tap()
-        let project = app.descendants(matching: .any)["calendar.project.qa-project"].firstMatch
-        reveal(app, target: project)
-        XCTAssertTrue(project.exists)
-        project.tap()
-        let work = app.buttons["calendar.project.item.qa-delete"]
-        XCTAssertTrue(work.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["今天"].waitForExistence(timeout: 20))
+        app.buttons["今天"].tap()
+        let work = app.buttons["action.item.qa-delete"]
+        reveal(app, target: work)
+        XCTAssertTrue(work.exists)
         work.tap()
+        let more = app.buttons["work.more"]
+        XCTAssertTrue(more.waitForExistence(timeout: 5))
+        more.tap()
         let delete = app.buttons["work.delete"]
-        reveal(app, target: delete)
-        XCTAssertTrue(delete.isHittable)
+        XCTAssertTrue(delete.waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["work.cancel"].exists)
         XCTAssertFalse(app.buttons["work.archive"].exists)
         delete.tap()
@@ -227,8 +226,8 @@ import XCTest
         app.alerts.buttons["work.delete.confirm"].firstMatch.tap()
         let absent = NSPredicate { _, _ in !work.exists }
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: absent, object: nil)], timeout: 10), .completed)
-        XCTAssertTrue(app.buttons["calendar.project.item.qa-drag"].exists)
-        capture("device-calendar-project-after-deletion")
+        capture("device-today-after-deletion")
+        app.buttons["日历"].tap()
         let rail = app.buttons["calendar.drag.item.qa-drag"]
         reveal(app, target: rail, searchUp: true)
         XCTAssertTrue(rail.exists)
@@ -239,10 +238,8 @@ import XCTest
         app.launch()
         XCTAssertTrue(app.buttons["日历"].waitForExistence(timeout: 20))
         app.buttons["日历"].tap()
-        reveal(app, target: project)
-        project.tap()
-        XCTAssertTrue(app.buttons["calendar.project.item.qa-drag"].exists)
-        XCTAssertFalse(app.buttons["calendar.project.item.qa-delete"].exists)
+        XCTAssertTrue(rail.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["calendar.drag.item.qa-delete"].exists)
         capture("device-deletion-persisted-after-relaunch")
     }
     func testNativeDragCreatesMovesRejectsInvalidAndPersistsTimeBlock() throws {

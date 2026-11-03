@@ -46,11 +46,9 @@ import UserNotifications
 }
 struct RootView: View {
     @Environment(AppModel.self) private var model
-    @State private var selected = 1
-    @State private var settings = false
-    @State private var startupRoute: WorkspaceStartRoute?
+    @State private var navigation = AppNavigation()
     var body: some View {
-        @Bindable var model = model
+        @Bindable var navigation = navigation
         Group {
             if model.loading {
                 VStack(spacing: 18) {
@@ -64,17 +62,24 @@ struct RootView: View {
                     Button("重新读取") { Task { await model.retryLoad() } }.buttonStyle(.borderedProminent).foregroundStyle(Color.cubicOnAccent)
                 }
             } else {
-                TabView(selection: $selected) {
-                    Tab("收件箱", systemImage: "tray", value: 0) { navigation { InboxView() } }
-                    Tab("行动", systemImage: "circle.hexagongrid", value: 1) { navigation { ActionsView() } }
-                    Tab("日历", systemImage: "calendar", value: 2) { navigation { CalendarView() } }
-                    Tab("项目", systemImage: "square.stack.3d.up", value: 3) { navigation { ProjectsView() } }
+                TabView(selection: $navigation.section) {
+                    ForEach(AppSection.allCases) { section in
+                        Tab(section.title, systemImage: section.symbol, value: section) { stack(section) }
+                            .badge(section == .attention ? model.attention.count : 0)
+                    }
+                }
+                .tabViewBottomAccessory {
+                    Button { navigation.capture = true } label: {
+                        Label("记录一件事", systemImage: "plus.circle.fill").font(.body.weight(.medium))
+                            .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16)
+                    }.accessibilityIdentifier("capture.open")
                 }
             }
         }
+        .environment(navigation)
         .safeAreaInset(edge: .top) {
             if !model.loading, model.loadFailure == nil, model.activeModalCount == 0, let issue = model.primaryServiceIssue {
-                Button { startupRoute = nil; settings = true } label: {
+                Button { navigation.openSettings() } label: {
                     HStack {
                         Label(issue, systemImage: "exclamationmark.circle")
                         Spacer()
@@ -85,10 +90,12 @@ struct RootView: View {
                 .accessibilityIdentifier("serviceIssue.openSettings")
             } else if !model.loading, model.loadFailure == nil, model.activeModalCount == 0,
                       model.syncDirectoryLabel == nil, model.workspace == .empty {
-                WorkspaceStartOptions { route in startupRoute = route; settings = true }
+                WorkspaceStartOptions { route in navigation.openSettings(route) }
             }
         }
-        .sheet(isPresented: $settings) { SettingsView(initialRoute: startupRoute) }
+        .sheet(isPresented: $navigation.settings) { SettingsView(initialRoute: navigation.startupRoute) }
+        .sheet(isPresented: $navigation.capture) { QuickCaptureView().environment(navigation) }
+        .sheet(item: $navigation.editor) { ProjectUISheetContent(sheet: $0) }
         .sheet(isPresented: Binding(get: { model.openingNoticeID != nil }, set: { if !$0 { model.openingNoticeID = nil } })) {
             NavigationStack {
                 if let id = model.openingNoticeID { NoticeDetailView(noticeID: id) }
@@ -101,15 +108,22 @@ struct RootView: View {
             Button("知道了") { model.errorMessage = nil; model.statusMessage = nil }
         } message: { Text(model.errorMessage ?? model.statusMessage ?? "") }
     }
-    private func navigation<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+    private func stack(_ section: AppSection) -> some View {
         NavigationStack {
-            content()
-                .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button("设置", systemImage: "slider.horizontal.3") { startupRoute = nil; settings = true }
-                            .accessibilityIdentifier("open-settings")
-                    }
+            Group {
+                switch section {
+                case .today: TodayView()
+                case .calendar: CalendarHomeView()
+                case .projects: ProjectsView()
+                case .attention: AttentionView()
                 }
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("设置", systemImage: "slider.horizontal.3") { navigation.openSettings() }
+                        .accessibilityIdentifier("open-settings")
+                }
+            }
         }
     }
 }

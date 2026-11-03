@@ -31,7 +31,8 @@ import XCTest
         continueAfterFailure = false
         var app = launch()
         shot("mac-01-launched", app)
-        app.descendants(matching: .any)["mac.sidebar.inbox"].firstMatch.click()
+        app.descendants(matching: .any)["mac.sidebar.attention"].firstMatch.click()
+        app.descendants(matching: .any)["attention.capture"].firstMatch.click()
         let title = app.descendants(matching: .any)["inbox.quick.title"].firstMatch
         XCTAssertTrue(title.waitForExistence(timeout: 10), app.debugDescription)
         title.click(); title.typeText("Mac 验证同步改写")
@@ -40,7 +41,7 @@ import XCTest
         shot("mac-02-work-added", app)
         app.terminate()
         app = launch()
-        app.descendants(matching: .any)["mac.sidebar.inbox"].firstMatch.click()
+        app.descendants(matching: .any)["mac.sidebar.attention"].firstMatch.click()
         XCTAssertTrue(text(app, "Mac 验证同步改写").waitForExistence(timeout: 10), "Work survives relaunch")
         shot("mac-03-after-relaunch", app)
     }
