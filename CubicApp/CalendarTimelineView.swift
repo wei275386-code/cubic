@@ -281,18 +281,29 @@ struct CalendarTimelineView: View {
     }
     private func blockContent(_ block: WorkTimeBlock, visibleMinutes: Double) -> some View {
         let past = block.end <= Date()
+        let name = model.item(block.itemID)?.name ?? "工作"
+        let range = "\(time(block.start))–\(time(block.end))"
         return VStack(alignment: .leading, spacing: 1) {
             HStack(spacing: 4) {
                 if past { Image(systemName: "checkmark").font(.system(size: 9, weight: .bold)) }
-                Text(model.item(block.itemID)?.name ?? "工作")
-                    .font(visibleMinutes < 30 ? .system(size: 10, weight: .semibold) : .caption.weight(.semibold))
-                    .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
                 if visibleMinutes < 30 {
-                    Text("\(time(block.start))–\(time(block.end))").font(.system(size: 9)).monospacedDigit().lineLimit(1)
+                    // One line in a narrow column: keep the whole time beside the name, otherwise drop it rather than cut both.
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 4) {
+                            Text(name).font(.system(size: 10, weight: .semibold)).lineLimit(1).fixedSize()
+                            Spacer(minLength: 0)
+                            Text(range).font(.system(size: 9)).monospacedDigit().lineLimit(1).fixedSize()
+                        }
+                        Text(name).font(.system(size: 10, weight: .semibold)).lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                } else {
+                    Text(name).font(.caption.weight(.semibold))
+                        .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
             if visibleMinutes >= 30 {
-                Text("\(time(block.start))–\(time(block.end))").font(.system(size: 10)).monospacedDigit().lineLimit(1)
+                Text(range).font(.system(size: 10)).monospacedDigit().lineLimit(1)
             }
             if visibleMinutes >= 60 {
                 Text(CalendarIntegrationCopy.blockStatus(block, model: model)).font(.caption2).lineLimit(1)
@@ -303,6 +314,7 @@ struct CalendarTimelineView: View {
             .background(Color.cubicAccent.opacity(past ? 0.1 : 0.2), in: RoundedRectangle(cornerRadius: CubicMetrics.blockRadius))
             .overlay(alignment: .leading) { Capsule().fill(Color.cubicAccent.opacity(past ? 0.5 : 1)).frame(width: 3).padding(.vertical, 3).padding(.leading, 2) }
             .clipShape(RoundedRectangle(cornerRadius: CubicMetrics.blockRadius))
+            .help("\(name) \(range)")
     }
     private func eventView(_ event: BusyEvent, rangeStart: Date, seconds: Double, height: Double, width: Double) -> some View {
         let lower = max(event.start, rangeStart), upper = min(event.end, rangeStart.addingTimeInterval(seconds))
